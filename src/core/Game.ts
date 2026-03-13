@@ -45,6 +45,9 @@ export class Game {
     await this.audioManager.init();
     await this.uiManager.init(this.container);
 
+    // Rebind OrbitControls to the Pixi canvas (now the topmost event target)
+    this.sceneManager.bindControlsTo(this.uiManager.canvas);
+
     // Start loading
     this._transition('loading');
     const loading = this._states.get('loading') as LoadingState;
