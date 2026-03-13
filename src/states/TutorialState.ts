@@ -315,9 +315,13 @@ export class TutorialState extends GameState {
       // Convert NDC targets to camera-local offsets:
       //   NDC_x = –0.72  → ~14% from left edge (sheep body left of popup)
       //   NDC_y = –0.38  → ~69% from top (popup zone — PixiJS popup renders on top)
+      // In landscape, screen height shrinks while width grows (same FOV_y).
+      // A fixed NDC fraction looks tiny in px — boost scale by aspect so the
+      // sheep keeps the same apparent pixel size as in portrait (aspect ≤ 1).
+      const scaleBoost = Math.max(1, aspect);
       const ox = -0.32 * d * tanHalfFovY * aspect;
       const oy = -0.79 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
-      const sc =  0.30 * d * tanHalfFovY;
+      const sc =  0.30 * d * tanHalfFovY * scaleBoost;
 
       const localOffset = new THREE.Vector3(ox, oy, oz);
       localOffset.applyQuaternion(cam.quaternion);
