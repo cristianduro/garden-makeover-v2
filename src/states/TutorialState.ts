@@ -14,6 +14,9 @@ const STEPS: TutStep[] = [
   { text: "Tap the ＋ buttons\nto add crops or animals.\nLet's build your farm!", camIdx: 3 },
 ];
 
+// Maximum line count across all steps — used to pre-size the box
+const MAX_LINES = Math.max(...STEPS.map(s => s.text.split('\n').length));
+
 export class TutorialState extends GameState {
   private _step = 0;
   private _hudObj: THREE.Object3D | null = null;
@@ -37,6 +40,7 @@ export class TutorialState extends GameState {
   private _boxBg!:       PIXI.Graphics;
   private _blinkT  = 0;
   private _blinkFn: ((dt: number) => void) | null = null;
+  private _resizeFn: (() => void) | null = null;
 
   constructor(game: Game) { super(game); }
 
@@ -54,84 +58,109 @@ export class TutorialState extends GameState {
   private _buildPixiUI(): void {
     const game = this._game as Game;
     const app  = game.uiManager.app;
-    const W    = innerWidth;
-    const H    = innerHeight;
 
     this._pixiOverlay = new PIXI.Container();
 
-    // ── Transparent clickable backdrop ────────────────────────
+    // ── Transparent clickable backdrop (sized in _layoutPixiUI) ──
     const backdrop = new PIXI.Graphics();
-    backdrop.beginFill(0x000000, 0.001); // near-transparent but hittable
-    backdrop.drawRect(0, 0, W, H);
-    backdrop.endFill();
     backdrop.eventMode = 'static';
-    backdrop.hitArea   = new PIXI.Rectangle(0, 0, W, H);
+    backdrop.name = 'backdrop';
     backdrop.on('pointertap', (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
       this._advance();
     });
-    backdrop.name = 'backdrop';
     this._pixiOverlay.addChild(backdrop);
 
     // ── Text box ──────────────────────────────────────────────
     this._boxCont = new PIXI.Container();
-
-    this._boxBg = new PIXI.Graphics();
+    this._boxBg   = new PIXI.Graphics();
     this._boxCont.addChild(this._boxBg);
 
-    const boxW = Math.min(600, W * 0.9);
-    const boxH = 130;
-
-    this._textEl = new PIXI.Text('', {
-      fontFamily: 'Fredoka One, cursive',
-      fontSize:   Math.min(24, Math.max(17, W * 0.028)),
-      fill:       0xffffff,
-      align:      'center',
-      wordWrap:   true,
-      wordWrapWidth: boxW - 56,
-      lineHeight: Math.min(24, Math.max(17, W * 0.028)) * 1.55,
-    });
+    this._textEl  = new PIXI.Text('', { fontFamily: 'Fredoka One, cursive', fill: 0xffffff, align: 'center', wordWrap: true });
     this._textEl.anchor.set(0.5, 0);
-    this._textEl.x = boxW / 2;
-    this._textEl.y = 20;
     this._boxCont.addChild(this._textEl);
 
-    this._clickEl = new PIXI.Text('tap to continue', {
-      fontFamily: 'Nunito, sans-serif',
-      fontSize:   Math.min(15, Math.max(12, W * 0.018)),
-      fontWeight: '700',
-      fill:       'rgba(255,255,255,0.4)',
-    });
+    this._clickEl = new PIXI.Text('tap to continue', { fontFamily: 'Nunito, sans-serif', fontWeight: '700', fill: 'rgba(255,255,255,0.4)' });
     this._clickEl.anchor.set(0.5, 0);
-    this._clickEl.x = boxW / 2;
-    this._clickEl.y = boxH - 28;
     this._clickEl.alpha = 0;
     this._boxCont.addChild(this._clickEl);
 
-    // Draw box background
-    this._boxBg.lineStyle(1.5, 0xffffff, 0.12);
-    this._boxBg.beginFill(0x080c08, 0.90);
-    this._boxBg.drawRoundedRect(0, 0, boxW, boxH, 16);
-    this._boxBg.endFill();
-
-    // Position box at bottom center
-    this._boxCont.x = (W - boxW) / 2;
-    this._boxCont.y = H - boxH - Math.max(12, H * 0.06);
-    this._boxCont.eventMode = 'none'; // let parent handle clicks
-
+    this._boxCont.eventMode = 'none';
     this._pixiOverlay.addChild(this._boxCont);
 
     // ── Blink animation on "tap to continue" ──────────────────
     this._blinkFn = (dt: number) => {
       this._blinkT += dt / 60;
       if (this._clickEl.alpha > 0) {
-        const v = 0.35 + 0.65 * (Math.sin(this._blinkT * Math.PI / 0.7) * 0.5 + 0.5);
-        this._clickEl.alpha = v;
+        this._clickEl.alpha = 0.35 + 0.65 * (Math.sin(this._blinkT * Math.PI / 0.7) * 0.5 + 0.5);
       }
     };
     app.ticker.add(this._blinkFn);
 
+    // ── Resize listener — reposition on viewport changes ──────
+    this._resizeFn = () => this._layoutPixiUI();
+    window.addEventListener('resize', this._resizeFn);
+
     game.uiManager.overlayLayer.addChild(this._pixiOverlay);
+
+    // Initial layout
+    this._layoutPixiUI();
+  }
+
+  /** Recalculates all positions/sizes from current viewport dimensions.
+   *  Safe to call any time (resize, orientation change). */
+  private _layoutPixiUI(): void {
+    const W = innerWidth;
+    const H = innerHeight;
+
+    // ── Backdrop ──────────────────────────────────────────────
+    const backdrop = this._pixiOverlay.getChildByName('backdrop') as PIXI.Graphics;
+    backdrop.clear();
+    backdrop.beginFill(0x000000, 0.001);
+    backdrop.drawRect(0, 0, W, H);
+    backdrop.endFill();
+    backdrop.hitArea = new PIXI.Rectangle(0, 0, W, H);
+
+    // ── Box dimensions ─────────────────────────────────────────
+    const boxW = Math.min(600, W * 0.9);
+    const fs   = Math.min(24, Math.max(17, W * 0.028));
+    const lh   = fs * 1.55;
+    // Height: top padding + all lines at max line count + gap + "tap" row
+    const boxH = Math.ceil(20 + MAX_LINES * lh + 36);
+
+    // ── Text styles ────────────────────────────────────────────
+    this._textEl.style = new PIXI.TextStyle({
+      fontFamily:    'Fredoka One, cursive',
+      fontSize:      fs,
+      fill:          0xffffff,
+      align:         'center',
+      wordWrap:      true,
+      wordWrapWidth: boxW - 48,
+      lineHeight:    lh,
+    });
+    this._textEl.x = boxW / 2;
+    this._textEl.y = 20;
+
+    this._clickEl.style = new PIXI.TextStyle({
+      fontFamily: 'Nunito, sans-serif',
+      fontSize:   Math.min(15, Math.max(12, W * 0.018)),
+      fontWeight: '700',
+      fill:       'rgba(255,255,255,0.4)',
+    });
+    this._clickEl.x = boxW / 2;
+    this._clickEl.y = boxH - 26;
+
+    // ── Box background ─────────────────────────────────────────
+    this._boxBg.clear();
+    this._boxBg.lineStyle(1.5, 0xffffff, 0.12);
+    this._boxBg.beginFill(0x080c08, 0.90);
+    this._boxBg.drawRoundedRect(0, 0, boxW, boxH, 16);
+    this._boxBg.endFill();
+
+    // ── Box position — bottom-centre with safe margin ──────────
+    const margin = Math.max(14, H * 0.04);
+    this._boxCont.x = (W - boxW) / 2;
+    this._boxCont.y = H - boxH - margin;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -146,7 +175,7 @@ export class TutorialState extends GameState {
 
       const obj = SkeletonUtils.clone(src) as THREE.Object3D;
       obj.scale.setScalar(0.20);
-      obj.position.set(-0.38, -0.44, -1.1);
+      obj.position.set(-0.38, -0.20, -1.1);
       obj.rotation.set(0.08, 2.4, 0.10);
 
       obj.traverse((o: THREE.Object3D) => {
@@ -267,14 +296,17 @@ export class TutorialState extends GameState {
     // Guide sheep (3D, camera-space)
     if (this._hudObj) {
       this._hudMixer?.update(dt);
-      const cam = game.sceneManager.camera;
-      const aspect    = innerWidth / innerHeight;
-      const isPortrait = aspect < 1;
+      const cam    = game.sceneManager.camera;
+      const aspect = innerWidth / innerHeight;
 
-      const ox = isPortrait ? -0.22 : -0.38;
-      const oy = isPortrait ? -0.52 : -0.44;
-      const oz = isPortrait ? -0.95 : -1.1;
-      const sc = isPortrait ? 0.14  : 0.20;
+      // Interpolate offsets continuously with aspect ratio so the sheep
+      // is always visible in the upper-left quadrant, above the bottom popup.
+      // t=0 → portrait (narrow), t=1 → wide landscape
+      const t  = Math.max(0, Math.min(1, (aspect - 0.75) / (1.0 - 0.75)));
+      const ox = -0.20 + (-0.38 - -0.20) * t;   // -0.20 (portrait) → -0.38 (landscape)
+      const oy = -0.10 + (-0.18 - -0.10) * t;   // raised vs old values; keeps sheep above popup
+      const oz = -0.90 + (-1.10 - -0.90) * t;   // -0.90 → -1.10
+      const sc =  0.13 + ( 0.20 -  0.13) * t;   //  0.13 → 0.20
 
       this._hudObj.scale.setScalar(sc);
       const bobY = oy + Math.sin(Date.now() * 0.0015) * 0.012;
@@ -291,7 +323,11 @@ export class TutorialState extends GameState {
 
   exit(): void {
     const game = this._game as Game;
-    // Clean up if overlay still exists (e.g. fast skip)
+
+    if (this._resizeFn) {
+      window.removeEventListener('resize', this._resizeFn);
+      this._resizeFn = null;
+    }
     if (this._pixiOverlay.parent) {
       game.uiManager.overlayLayer.removeChild(this._pixiOverlay);
     }
