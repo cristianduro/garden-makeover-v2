@@ -1,16 +1,16 @@
-# 🌱 Garden Makeover v2— Interactive 3D Playable Ad
+# 🌱 Garden Makeover v2 — Interactive 3D Playable Ad
 
 > A mobile-first interactive 3D garden game built as a **playable ad** demo. Place crops and animals, manage your coins, skip to night — all in a polished WebGL experience running entirely in the browser.
 
 <p align="center">
-  <img src="public/assets/icon.png" width="96" alt="Garden Makeover icon" />
+  <img src="public/assets/icon.png" width="96" alt="Garden Makeover v2 icon" />
 </p>
 
 ---
 
 ## 🎮 What is it?
 
-**Garden Makeover** is a fully playable mini-game built with **Three.js** (3D) and **Pixi.js** (2D FX), designed as a high-quality playable advertisement for mobile and desktop. It showcases real-time 3D rendering, cinematic state transitions, and responsive touch-friendly UI — all in a single self-contained web app.
+**Garden Makeover v2** is a fully playable mini-game built with **Three.js** (3D) and **Pixi.js** (ALL UI, 2D FX), designed as a high-quality playable advertisement for mobile and desktop. It showcases real-time 3D rendering, cinematic state transitions, and responsive touch-friendly UI — all in a single self-contained web app.
 
 ---
 
@@ -67,7 +67,7 @@
   - Texture preloaded at init to avoid lag
 - Pixi.js canvas overlay (`z-index: 45`, pointer-events none) for 2D FX on top of WebGL
 
-### 🖼️ UI & HUD
+### 🖼️ UI & HUD (PIXI)
 - **Coin HUD** (top-right) with animated money icon
 - **Category sidebar** with crop / animal tabs and item submenus
 - **Skip Day button** with pulsing glow animation, appears after first placement
@@ -102,7 +102,7 @@ src/
 │   ├── AssetManager.ts      # GLTF + texture preloading
 │   ├── SceneManager.ts      # Three.js scene, camera, renderer, lights
 │   ├── AudioManager.ts      # Web Audio wrapper
-│   └── UIManager.ts         # All DOM/CSS UI: HUD, sidebar, modals, FX
+│   └── UIManager.ts         # All PIXI UI: HUD, sidebar, modals, FX
 ├── garden/
 │   ├── GardenGrid.ts        # Grid logic for field and fence zones
 │   ├── ItemCatalog.ts       # Item definitions (crops + animals)
