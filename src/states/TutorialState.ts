@@ -100,7 +100,7 @@ export class TutorialState extends GameState {
       fontFamily: 'Nunito, sans-serif',
       fontSize:   Math.min(15, Math.max(12, W * 0.018)),
       fontWeight: '700',
-      fill:       0xffffff66,
+      fill:       'rgba(255,255,255,0.4)',
     });
     this._clickEl.anchor.set(0.5, 0);
     this._clickEl.x = boxW / 2;

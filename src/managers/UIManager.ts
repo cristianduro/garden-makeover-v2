@@ -424,7 +424,7 @@ export class UIManager extends EventEmitter {
     backBg.drawRoundedRect(0, 0, itemW, backH, 14);
     backBg.endFill();
     const backTxt = new PIXI.Text('← Back', {
-      fontFamily: FONT_TITLE, fontSize: 16, fill: 0xffffffb4,
+      fontFamily: FONT_TITLE, fontSize: 16, fill: 'rgba(255,255,255,0.7)',
     });
     backTxt.anchor.set(0, 0.5);
     backTxt.x = 14; backTxt.y = backH / 2;
@@ -872,7 +872,7 @@ export class UIManager extends EventEmitter {
 
     this._upgradeSubText = new PIXI.Text('', {
       fontFamily: FONT_BODY, fontSize: 16, fontWeight: '700',
-      fill: 0xffffffbb, wordWrap: true, wordWrapWidth: boxW - 64,
+      fill: 'rgba(255,255,255,0.73)', wordWrap: true, wordWrapWidth: boxW - 64,
       align: 'center',
     });
     this._upgradeSubText.anchor.set(0.5, 0);
@@ -905,7 +905,7 @@ export class UIManager extends EventEmitter {
     // Dismiss
     const dismissTxt = new PIXI.Text('Maybe later', {
       fontFamily: FONT_BODY, fontSize: 13, fontWeight: '700',
-      fill: 0xffffff66,
+      fill: 'rgba(255,255,255,0.4)',
     });
     dismissTxt.anchor.set(0.5, 0);
     dismissTxt.x = boxW / 2; dismissTxt.y = 248;
@@ -917,8 +917,8 @@ export class UIManager extends EventEmitter {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
       this._hideUpgradeModal();
     });
-    dismissTxt.on('pointerover', () => { dismissTxt.style.fill = 0xffffffcc; });
-    dismissTxt.on('pointerout',  () => { dismissTxt.style.fill = 0xffffff66; });
+    dismissTxt.on('pointerover', () => { dismissTxt.style.fill = 'rgba(255,255,255,0.8)'; });
+    dismissTxt.on('pointerout',  () => { dismissTxt.style.fill = 'rgba(255,255,255,0.4)'; });
 
     const box = new PIXI.Container();
     box.addChild(boxBg, emoji, title, this._upgradeSubText, ctaCont, dismissTxt);

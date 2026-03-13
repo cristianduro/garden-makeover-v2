@@ -60,7 +60,7 @@ export class LoadingState extends GameState {
     this._label = new PIXI.Text('Loading assets…', {
       fontFamily: 'Arial, sans-serif',
       fontSize:   14,
-      fill:       0xffffff99,
+      fill:       'rgba(255,255,255,0.6)',
     });
     this._label.anchor.set(0.5, 0);
     this._label.x = W / 2;
