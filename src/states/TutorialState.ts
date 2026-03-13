@@ -12,6 +12,7 @@ const STEPS: TutStep[] = [
   { text: "This is your Cropland.\nPlant fruits and vegetables here!", camIdx: 1 },
   { text: "And this is the Animal Pen.\nKeep your livestock safe!", camIdx: 2 },
   { text: "Tap the ＋ buttons\nto add crops or animals.\nLet's build your farm!", camIdx: 3 },
+  { text: "Remember that you can rotate the camera\nto place items in a more accurate fashion.\nLet's do it!", camIdx: 4 },
 ];
 
 // Maximum line count across all steps — used to pre-size the box
