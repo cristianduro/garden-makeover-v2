@@ -318,10 +318,10 @@ export class TutorialState extends GameState {
       // In landscape, screen height shrinks while width grows (same FOV_y).
       // A fixed NDC fraction looks tiny in px — boost scale by aspect so the
       // sheep keeps the same apparent pixel size as in portrait (aspect ≤ 1).
-      const scaleBoost = Math.max(1, aspect);
+      const scaleBoost = Math.max(0.9, aspect);
       const ox = -0.32 * d * tanHalfFovY * aspect;
       const oy = -0.79 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
-      const sc =  0.30 * d * tanHalfFovY * scaleBoost;
+      const sc =  0.25 * d * tanHalfFovY * scaleBoost;
 
       const localOffset = new THREE.Vector3(ox, oy, oz);
       localOffset.applyQuaternion(cam.quaternion);

@@ -59,7 +59,7 @@ export const GameConfig = {
   FOG_NIGHT:     { color: 0x07081a, near: 60, far: 130 },
 
   // ── Gameplay ─────────────────────────────────────────────────────────────
-  START_COINS: 500,
+  START_COINS: 1000,
 
   // ── Tutorial camera waypoints ────────────────────────────────────────────
   // Landscape cameras (aspect >= 1)
