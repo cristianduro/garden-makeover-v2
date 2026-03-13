@@ -311,11 +311,11 @@ export class TutorialState extends GameState {
       const aspect = innerWidth / innerHeight;
 
       // Convert NDC targets to camera-local offsets:
-      //   NDC_x = –0.44  → 28% from left edge, adapts automatically with aspect
-      //   NDC_y = +0.24  → 38% from top edge, above the bottom popup
-      const ox = -0.44 * d * tanHalfFovY * aspect;
-      const oy =  0.24 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
-      const sc =  0.18 * d * tanHalfFovY;
+      //   NDC_x = –0.72  → ~14% from left edge (sheep body left of popup)
+      //   NDC_y = –0.38  → ~69% from top (popup zone — PixiJS popup renders on top)
+      const ox = -0.72 * d * tanHalfFovY * aspect;
+      const oy = -0.38 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
+      const sc =  0.30 * d * tanHalfFovY;
 
       const localOffset = new THREE.Vector3(ox, oy, oz);
       localOffset.applyQuaternion(cam.quaternion);
