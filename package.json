@@ -1,0 +1,19 @@
+{
+  "name": "garden-makeover",
+  "version": "1.0.0",
+  "description": "GardenMakeover – Interactive 3D Playable Ad",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "pixi.js": "^7.3.2",
+    "three": "^0.158.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.158.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
+}
