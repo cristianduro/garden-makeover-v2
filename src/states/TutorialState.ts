@@ -313,8 +313,8 @@ export class TutorialState extends GameState {
       // Convert NDC targets to camera-local offsets:
       //   NDC_x = –0.72  → ~14% from left edge (sheep body left of popup)
       //   NDC_y = –0.38  → ~69% from top (popup zone — PixiJS popup renders on top)
-      const ox = -0.72 * d * tanHalfFovY * aspect;
-      const oy = -0.38 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
+      const ox = -0.32 * d * tanHalfFovY * aspect;
+      const oy = -0.79 * d * tanHalfFovY + Math.sin(Date.now() * 0.0015) * 0.012;
       const sc =  0.30 * d * tanHalfFovY;
 
       const localOffset = new THREE.Vector3(ox, oy, oz);
