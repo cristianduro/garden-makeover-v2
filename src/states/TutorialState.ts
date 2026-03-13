@@ -305,10 +305,12 @@ export class TutorialState extends GameState {
       const cam = game.sceneManager.camera;
 
       // FOV_y = 52° → tan(26°) = 0.4877.  Depth oz must be > near (1.0).
-      const tanHalfFovY = 0.4877;
+      // IMPORTANT: use cam.aspect (updated by _onResize from container size),
+      // NOT innerWidth/innerHeight which can differ (scrollbars, browser chrome).
+      const tanHalfFovY = Math.tan((cam.fov / 2) * (Math.PI / 180));
       const oz = -1.6;
       const d  = Math.abs(oz);
-      const aspect = innerWidth / innerHeight;
+      const aspect = cam.aspect; // always matches the actual projection matrix
 
       // Convert NDC targets to camera-local offsets:
       //   NDC_x = –0.72  → ~14% from left edge (sheep body left of popup)
