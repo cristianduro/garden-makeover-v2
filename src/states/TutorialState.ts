@@ -164,7 +164,8 @@ export class TutorialState extends GameState {
   }
 
   // ════════════════════════════════════════════════════════════════
-  //  3D GUIDE SHEEP  (Three.js — stays in 3D scene)
+  //  3D GUIDE SHEEP  — added as child of camera (camera-space HUD)
+  //  Position/scale adapt to aspect ratio; rotation is fixed once.
   // ════════════════════════════════════════════════════════════════
   private _spawnGuide(): void {
     const game = this._game as Game;
@@ -174,9 +175,6 @@ export class TutorialState extends GameState {
       if (!src) { console.warn('sheep_1 not found'); return; }
 
       const obj = SkeletonUtils.clone(src) as THREE.Object3D;
-      obj.scale.setScalar(0.20);
-      obj.position.set(-0.38, -0.20, -1.1);
-      obj.rotation.set(0.08, 2.4, 0.10);
 
       obj.traverse((o: THREE.Object3D) => {
         const mesh = o as THREE.Mesh;
@@ -187,20 +185,70 @@ export class TutorialState extends GameState {
           mesh.renderOrder   = 999;
           if (mesh.material) {
             const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            mats.forEach(m => { (m as THREE.Material).depthTest = false; });
+            mats.forEach(m => {
+              (m as THREE.Material).depthTest  = false;
+              (m as THREE.Material).depthWrite = false;
+            });
           }
         }
       });
 
-      game.sceneManager.scene.add(obj);
+      // ── Camera-space HUD: add as child of camera ──────────────
+      // The sheep now inherits the camera's world transform automatically.
+      // We only need to set local position / scale — rotation is fixed once
+      // and never copied/overwritten per frame (that was the distortion cause).
+      const cam = game.sceneManager.camera;
+      cam.add(obj);
       this._hudObj = obj;
+
+      // Rotation fixed once in local camera space:
+      //   Y≈2.4 rad ≈ 138° shows the sheep's front-right profile to the viewer
+      obj.rotation.set(0.08, 2.4, 0.08);
 
       const clip = gltf.animations?.find((a: THREE.AnimationClip) => a.name === 'idle_sheep');
       if (clip) {
         this._hudMixer = new THREE.AnimationMixer(obj);
         this._hudMixer.clipAction(clip).play();
       }
+
+      // Initial transform
+      this._updateGuideTransform(0);
     } catch(e) { console.warn('Could not spawn guide', e); }
+  }
+
+  /**
+   * Recalculates the sheep's LOCAL position and scale every frame.
+   * Uses the analytical relationship between camera-space coordinates and
+   * NDC so the sheep stays at the same screen-relative position at any
+   * aspect ratio.
+   *
+   * FOV_y = 52° → tanHalfFov = tan(26°) ≈ 0.4877
+   * Depth oz is chosen so that oz > near (1.0) with comfortable margin.
+   *
+   * Target screen position: ~28% from left, ~38% from top (above popup).
+   */
+  private _updateGuideTransform(bobOffset: number): void {
+    if (!this._hudObj) return;
+
+    const aspect       = innerWidth / innerHeight;
+    const tanHalfFovY  = 0.4877; // tan(26°) for FOV_y = 52°
+    const oz           = -1.6;   // depth in front of camera (> near=1.0)
+    const d            = Math.abs(oz);
+
+    // NDC targets (–1 = left/bottom edge, +1 = right/top edge)
+    // 28% from left  → NDC_x = -1 + 2*0.28 = -0.44
+    // 38% from top   → NDC_y = +1 - 2*0.38 = +0.24  (positive = above center)
+    const ndcX  = -0.44;
+    const ndcY  =  0.24; // upper portion so popup doesn't cover the sheep
+
+    const ox = ndcX * d * tanHalfFovY * aspect;
+    const oy = ndcY * d * tanHalfFovY + bobOffset;
+
+    // Scale so sheep occupies ~18% of screen half-height regardless of depth
+    const sc = 0.18 * d * tanHalfFovY;
+
+    this._hudObj.position.set(ox, oy, oz);
+    this._hudObj.scale.setScalar(sc);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -256,7 +304,7 @@ export class TutorialState extends GameState {
         if (this._blinkFn) app.ticker.remove(this._blinkFn);
 
         if (this._hudObj) {
-          game.sceneManager.scene.remove(this._hudObj);
+          game.sceneManager.camera.remove(this._hudObj);
           this._hudObj = null;
         }
         game.sceneManager.setControlsEnabled(true);
@@ -293,31 +341,11 @@ export class TutorialState extends GameState {
       }
     }
 
-    // Guide sheep (3D, camera-space)
+    // Guide sheep — camera child, just update position/scale each frame
     if (this._hudObj) {
       this._hudMixer?.update(dt);
-      const cam    = game.sceneManager.camera;
-      const aspect = innerWidth / innerHeight;
-
-      // Interpolate offsets continuously with aspect ratio so the sheep
-      // is always visible in the upper-left quadrant, above the bottom popup.
-      // t=0 → portrait (narrow), t=1 → wide landscape
-      const t  = Math.max(0, Math.min(1, (aspect - 0.75) / (1.0 - 0.75)));
-      const ox = -0.20 + (-0.38 - -0.20) * t;   // -0.20 (portrait) → -0.38 (landscape)
-      const oy = -0.10 + (-0.18 - -0.10) * t;   // raised vs old values; keeps sheep above popup
-      const oz = -0.90 + (-1.10 - -0.90) * t;   // -0.90 → -1.10
-      const sc =  0.13 + ( 0.20 -  0.13) * t;   //  0.13 → 0.20
-
-      this._hudObj.scale.setScalar(sc);
-      const bobY = oy + Math.sin(Date.now() * 0.0015) * 0.012;
-      const localOffset = new THREE.Vector3(ox, bobY, oz);
-      localOffset.applyQuaternion(cam.quaternion);
-      this._hudObj.position.copy(cam.position).add(localOffset);
-
-      this._hudObj.rotation.copy(cam.rotation);
-      this._hudObj.rotateY(2.4);
-      this._hudObj.rotateX(0.08);
-      this._hudObj.rotateZ(0.10);
+      const bobOffset = Math.sin(Date.now() * 0.0015) * 0.012;
+      this._updateGuideTransform(bobOffset);
     }
   }
 
@@ -336,7 +364,7 @@ export class TutorialState extends GameState {
       this._blinkFn = null;
     }
     if (this._hudObj) {
-      game.sceneManager.scene.remove(this._hudObj);
+      game.sceneManager.camera.remove(this._hudObj);
       this._hudObj = null;
     }
   }
