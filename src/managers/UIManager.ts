@@ -40,8 +40,10 @@ export class UIManager extends EventEmitter {
   // ── Skip Day ─────────────────────────────────────────────────
   private _skipDayBtn!:    PIXI.Container;
   private _skipDayBg!:     PIXI.Graphics;
+  private _skipDayBorder!: PIXI.Graphics;   // separate layer for animated border
   private _skipDayHandler: (() => void) | null = null;
-  private _skipDayT = 0;
+  private _skipDayT  = 0;
+  private _skipDaySz = 52;  // stored fixed size — avoids feedback loop in ticker
 
   // ── Sidebar ───────────────────────────────────────────────────
   private _sidebar!:        PIXI.Container;
@@ -236,6 +238,7 @@ export class UIManager extends EventEmitter {
     this._skipDayBtn = new PIXI.Container();
     this._skipDayBtn.visible = false;
 
+    // Filled background — drawn once in layout, never in the ticker
     this._skipDayBg = new PIXI.Graphics();
     this._skipDayBtn.addChild(this._skipDayBg);
 
@@ -243,6 +246,10 @@ export class UIManager extends EventEmitter {
     img.anchor.set(0.5);
     img.name = 'img';
     this._skipDayBtn.addChild(img);
+
+    // Animated border — separate Graphics on top, only border is redrawn each frame
+    this._skipDayBorder = new PIXI.Graphics();
+    this._skipDayBtn.addChild(this._skipDayBorder);
 
     this._skipDayBtn.eventMode = 'static';
     this._skipDayBtn.cursor    = 'pointer';
@@ -259,31 +266,35 @@ export class UIManager extends EventEmitter {
     this._skipDayBtn.on('pointerover', () => this._skipDayBtn.scale.set(1.1));
     this._skipDayBtn.on('pointerout',  () => this._skipDayBtn.scale.set(1));
 
-    // Pulse animation
+    // Pulse: only redraw the border Graphics using the stored fixed size
     this._pixi.ticker.add((dt: number) => {
       if (!this._skipDayBtn.visible) return;
       this._skipDayT += dt / 60;
-      const a = 0.4 + 0.5 * (Math.sin(this._skipDayT * Math.PI / 0.9) * 0.5 + 0.5);
-      const sz = this._skipDayBtn.getChildByName('img') ? (this._skipDayBtn.width) : 52;
-      this._skipDayBg.clear();
-      this._skipDayBg.lineStyle(2, 0xffc832, a);
-      this._skipDayBg.beginFill(0x000000, 0.72);
-      this._skipDayBg.drawRoundedRect(0, 0, sz, sz, 14);
-      this._skipDayBg.endFill();
+      const a   = 0.35 + 0.55 * (Math.sin(this._skipDayT * Math.PI / 0.9) * 0.5 + 0.5);
+      const sz  = this._skipDaySz;  // fixed — never read container.width
+      this._skipDayBorder.clear();
+      this._skipDayBorder.lineStyle(2.5, 0xffc832, a);
+      this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
     });
 
     this._uiLayer.addChild(this._skipDayBtn);
   }
 
   private _layoutSkipDay(): void {
-    const sz = Math.max(42, Math.min(innerWidth * 0.08, 56));
+    const sz     = Math.max(42, Math.min(innerWidth * 0.08, 56));
     const margin = Math.max(10, innerWidth * 0.02);
+    this._skipDaySz = sz;   // store for ticker
 
+    // Static filled bg — no border here, border is handled by _skipDayBorder
     this._skipDayBg.clear();
-    this._skipDayBg.lineStyle(2, 0xffc832, 0.5);
     this._skipDayBg.beginFill(0x000000, 0.72);
     this._skipDayBg.drawRoundedRect(0, 0, sz, sz, 14);
     this._skipDayBg.endFill();
+
+    // Redraw border at correct size
+    this._skipDayBorder.clear();
+    this._skipDayBorder.lineStyle(2.5, 0xffc832, 0.5);
+    this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
 
     const img = this._skipDayBtn.getChildByName('img') as PIXI.Sprite;
     if (img) { img.width = sz - 14; img.height = sz - 14; img.x = sz / 2; img.y = sz / 2; }
@@ -369,26 +380,22 @@ export class UIManager extends EventEmitter {
     row.addChild(btnCont);
 
     // ── Label ──────────────────────────────────────────────────
-    const lblW = 80;
-    const lblBg = new PIXI.Graphics();
+    const lblW   = 80;
+    const lblGap = 6;   // gap between icon button and label
+    const lblBg  = new PIXI.Graphics();
     lblBg.lineStyle(1, 0xffffff, 0.15);
     lblBg.beginFill(0x000000, 0.78);
-    lblBg.drawRoundedRect(0, 0, lblW + RAD, SZ, RAD);
+    lblBg.drawRoundedRect(0, 0, lblW, SZ, RAD);
     lblBg.endFill();
-    // Cover left-side radius
-    const lblBg2 = new PIXI.Graphics();
-    lblBg2.beginFill(0x000000, 0.78);
-    lblBg2.drawRect(0, 0, RAD, SZ);
-    lblBg2.endFill();
     const lblCont = new PIXI.Container();
-    lblCont.addChild(lblBg, lblBg2);
+    lblCont.addChild(lblBg);
     const lblTxt = new PIXI.Text(label, {
       fontFamily: FONT_TITLE, fontSize: 16, fill: 0xffffff,
     });
     lblTxt.anchor.set(0, 0.5);
-    lblTxt.x = RAD + 4; lblTxt.y = SZ / 2;
+    lblTxt.x = 12; lblTxt.y = SZ / 2;
     lblCont.addChild(lblTxt);
-    lblCont.x = SZ;
+    lblCont.x = SZ + lblGap;
     lblCont.name = 'label';
     row.addChild(lblCont);
 
