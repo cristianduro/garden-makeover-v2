@@ -73,7 +73,7 @@ export class SceneManager {
     this._controls.maxDistance    = cfg.CAM_MAX_DIST;
     this._controls.enableDamping  = true;
     this._controls.dampingFactor  = 0.08;
-    this._controls.enablePan      = true;
+    this._controls.enablePan      = false;
     this._controls.screenSpacePanning = true;
     this._controls.update();
 
@@ -95,6 +95,30 @@ export class SceneManager {
 
   setControlsEnabled(v: boolean): void {
     this._controls.enabled = v;
+  }
+
+  /**
+   * Rebind OrbitControls to a new DOM element (e.g. the Pixi canvas overlay).
+   * Call this once, after the overlay canvas is in the DOM.
+   */
+  bindControlsTo(element: HTMLElement): void {
+    const cfg     = GameConfig;
+    const target  = this._controls.target.clone();
+    const enabled = this._controls.enabled;
+    this._controls.dispose();
+
+    this._controls = new OrbitControls(this._camera, element);
+    this._controls.target.copy(target);
+    this._controls.minPolarAngle      = cfg.CAM_MIN_POLAR;
+    this._controls.maxPolarAngle      = cfg.CAM_MAX_POLAR;
+    this._controls.minDistance        = cfg.CAM_MIN_DIST;
+    this._controls.maxDistance        = cfg.CAM_MAX_DIST;
+    this._controls.enableDamping      = true;
+    this._controls.dampingFactor      = 0.08;
+    this._controls.enablePan          = false;
+    this._controls.screenSpacePanning = true;
+    this._controls.enabled            = enabled;
+    this._controls.update();
   }
 
   update(): void {

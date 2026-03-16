@@ -56,7 +56,10 @@ export class PlayState extends GameState {
     game.sceneManager.setControlsEnabled(true);
     game.uiManager.on('itemSelected', this._onItemSelected);
 
-    const cv = game.sceneManager.renderer.domElement;
+    // Listen on the Pixi canvas (topmost layer).
+    // Pixi UI elements call stopImmediatePropagation() on their native events,
+    // so only non-UI pointer events reach these handlers.
+    const cv = game.uiManager.canvas;
     cv.addEventListener('pointerdown', this._onPointerDown);
     cv.addEventListener('pointermove', this._onPointerMove);
     cv.addEventListener('pointerup',   this._onPointerUp);
@@ -328,7 +331,7 @@ export class PlayState extends GameState {
 
   exit(): void {
     const game = this._game as Game;
-    const cv   = game.sceneManager.renderer.domElement;
+    const cv   = game.uiManager.canvas;
     cv.removeEventListener('pointerdown', this._onPointerDown);
     cv.removeEventListener('pointermove', this._onPointerMove);
     cv.removeEventListener('pointerup',   this._onPointerUp);

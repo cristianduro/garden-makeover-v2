@@ -1,4 +1,4 @@
-# 🌱 Garden Makeover — Interactive 3D Playable Ad
+# 🌱 Garden Makeover v2— Interactive 3D Playable Ad
 
 > A mobile-first interactive 3D garden game built as a **playable ad** demo. Place crops and animals, manage your coins, skip to night — all in a polished WebGL experience running entirely in the browser.
 
@@ -182,13 +182,3 @@ npm run build
 | Animal pen | 2 | 3 | 1.6u | X: 7.4, Z: -10.2 |
 
 Grid Y ground plane: **4.05**
-
----
-
-## 📄 License
-
-MIT — free to use, modify and distribute.
-
----
-
-<p align="center">Made with ☕ and Three.js</p>
