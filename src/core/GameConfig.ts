@@ -44,7 +44,7 @@ export const GameConfig = {
   CAM_POS:    { x: -1, y: 32, z: 32 },
   CAM_TARGET: { x: -1, y: 4.0, z: -6 },
   CAM_MIN_POLAR: 0.25,
-  CAM_MAX_POLAR: 1.2,  // ~60° — impide ver bajo el suelo
+  CAM_MAX_POLAR: 1.05,  // ~60° — impide ver bajo el suelo
   CAM_MIN_DIST:  14,
   CAM_MAX_DIST:  60,
 
@@ -59,7 +59,7 @@ export const GameConfig = {
   FOG_NIGHT:     { color: 0x07081a, near: 60, far: 130 },
 
   // ── Gameplay ─────────────────────────────────────────────────────────────
-  START_COINS: 1000,
+  START_COINS: 500,
 
   // ── Tutorial camera waypoints ────────────────────────────────────────────
   // Landscape cameras (aspect >= 1)

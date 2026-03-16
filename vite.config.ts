@@ -4,7 +4,6 @@ import path from 'path';
 export default defineConfig({
   root: '.',
   publicDir: 'public',
-  base: "/garden-makeover-v2/",
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

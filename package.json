@@ -1,7 +1,6 @@
 {
   "name": "garden-makeover",
   "version": "1.0.0",
-  "homepage": "https://cristianduro.github.io/garden-makeover-v2/",
   "description": "GardenMakeover – Interactive 3D Playable Ad",
   "scripts": {
     "dev": "vite",

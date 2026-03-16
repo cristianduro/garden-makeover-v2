@@ -5,1102 +5,750 @@ import { GameConfig } from '../core/GameConfig';
 
 type ImgKey = keyof typeof GameConfig.ASSETS.IMAGES;
 
-const FONT_TITLE = 'Fredoka One, cursive';
-const FONT_BODY  = 'Nunito, sans-serif';
-
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
-
 /**
- * UIManager — 100 % PixiJS, zero DOM elements.
+ * UIManager — replicates the reference game UI:
  *
- * Events emitted:
- *   'itemSelected'  (item: ItemData | null)
- *   'dayNight'
- *   'mute'
- *   'tutDone'
+ *  TOP-RIGHT: coin counter (gem icon)
+ *  LEFT SIDEBAR: Crop | Cattle buttons → expands to item sub-list
+ *  IN-WORLD: handled by ZoneHints (+ sprites)
+ *  BOTTOM-CENTER: placement prompt when item selected
+ *
+ * Events:
+ *  'itemSelected'  (item: ItemData | null)
+ *  'dayNight'
+ *  'mute'
+ *  'tutDone'
  */
 export class UIManager extends EventEmitter {
+  private _pixi!:    PIXI.Application;
+  private _root!:    HTMLElement;
 
-  // ── Pixi ───────────────────────────────────────────────────────
-  private _pixi!:         PIXI.Application;
-  private _uiLayer!:      PIXI.Container;   // HUD + sidebar
-  private _fxLayer!:      PIXI.Container;   // sparkles
-  public  _overlayLayer!: PIXI.Container;   // loading / tutorial / modals
-  private _textures:      Map<string, PIXI.Texture> = new Map();
-  private _smokeTexture:  PIXI.Texture | null = null;
+  // DOM panels
+  private _sidebar!: HTMLElement;
+  private _coinEl!:  HTMLElement;
+  private _prompt!:  HTMLElement;
+  private _toastWrap!: HTMLElement;
 
-  // ── Coin HUD ────────────────────────────────────────────────
-  private _coinHUD!:   PIXI.Container;
-  private _coinText!:  PIXI.Text;
-  private _coinHUDBg!: PIXI.Graphics;
-
-  // ── Watermark ───────────────────────────────────────────────
-  private _watermark!: PIXI.Sprite;
-
-  // ── Skip Day ─────────────────────────────────────────────────
-  private _skipDayBtn!:    PIXI.Container;
-  private _skipDayBg!:     PIXI.Graphics;
-  private _skipDayBorder!: PIXI.Graphics;   // separate layer for animated border
-  private _skipDayHandler: (() => void) | null = null;
-  private _skipDayT  = 0;
-  private _skipDaySz = 52;  // stored fixed size — avoids feedback loop in ticker
-
-  // ── Sidebar ───────────────────────────────────────────────────
-  private _sidebar!:        PIXI.Container;
-  private _catRows!:        PIXI.Container[];
-  private _catBtnConts:     Record<ItemCategory, PIXI.Container> = {} as any;
-  private _catBtnBgs:       Record<ItemCategory, PIXI.Graphics>  = {} as any;
-  private _catIconSprites:  Record<ItemCategory, PIXI.Sprite>    = {} as any;
-  private _catSubMenus:     Record<ItemCategory, PIXI.Container> = {} as any;
-  private _catDefaultImg:   Record<ItemCategory, string> = {
-    crops:   GameConfig.ASSETS.IMAGES.corn,
-    animals: GameConfig.ASSETS.IMAGES.cow,
-  };
-  private _itemBtnBgs:   Map<string, PIXI.Graphics>  = new Map();
-  private _openCat:      ItemCategory | null = null;
-
-  // ── Placement prompt ─────────────────────────────────────────
-  private _prompt!:     PIXI.Container;
-  private _promptText!: PIXI.Text;
-
-  // ── Toasts ────────────────────────────────────────────────────
-  private _toastLayer!: PIXI.Container;
-
-  // ── Upgrade modal ─────────────────────────────────────────────
-  private _upgradeModal!:    PIXI.Container;
-  private _upgradeSubText!:  PIXI.Text;
-
-  // ── State ──────────────────────────────────────────────────────
   private _coins: number = GameConfig.START_COINS;
-  private _selItem:       ItemData | null = null;
-  private _animalCount  = 0;
-  private _plantCount   = 0;
+  private _selItem: ItemData | null = null;
+  private _menuOpen = false;
+  private _openCat: ItemCategory | null = null;
+  private _animalCount = 0;
+  private _plantCount  = 0;
+  private _upgradeModal!: HTMLElement;
+  private _skipDayBtn!:   HTMLElement;
 
-  // ── Public API ──────────────────────────────────────────────────
-  get canvas():       HTMLCanvasElement { return this._pixi.view as HTMLCanvasElement; }
-  get app():          PIXI.Application  { return this._pixi; }
-  get overlayLayer(): PIXI.Container    { return this._overlayLayer; }
-  get selectedItem(): ItemData | null   { return this._selItem; }
-  get coins():        number            { return this._coins; }
-  get animalCount():  number            { return this._animalCount; }
-  get plantCount():   number            { return this._plantCount; }
-
-  // ════════════════════════════════════════════════════════════════
-  //  INIT
-  // ════════════════════════════════════════════════════════════════
   async init(container: HTMLElement): Promise<void> {
-    this._loadFonts();
-
-    this._pixi = new PIXI.Application({
-      width:           innerWidth,
-      height:          innerHeight,
-      backgroundAlpha: 0,
-      autoDensity:     true,
-      resolution:      Math.min(devicePixelRatio, 2),
-    });
-
-    const cv = this._pixi.view as HTMLCanvasElement;
-    cv.style.cssText = 'position:absolute;inset:0;z-index:45;pointer-events:auto;';
-    container.appendChild(cv);
-
-    this._uiLayer      = new PIXI.Container();
-    this._fxLayer      = new PIXI.Container();
-    this._overlayLayer = new PIXI.Container();
-    this._pixi.stage.addChild(this._uiLayer);
-    this._pixi.stage.addChild(this._fxLayer);
-    this._pixi.stage.addChild(this._overlayLayer);
-
-    await this._loadTextures();
-    this._smokeTexture = this._textures.get('smoke') ?? null;
-
+    this._root = container;
+    this._injectStyles();
     this._buildCoinHUD();
-    this._buildWatermark();
-    this._buildSkipDay();
     this._buildSidebar();
     this._buildPrompt();
-    this._buildToastLayer();
+    this._buildToasts();
     this._buildUpgradeModal();
-
-    window.addEventListener('resize', () => this._onResize());
-    this._onResize();
-  }
-
-  private _loadFonts(): void {
-    if (document.getElementById('gm-fonts')) return;
-    const link = document.createElement('link');
-    link.id   = 'gm-fonts';
-    link.rel  = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@600;700;800;900&display=swap';
-    document.head.appendChild(link);
-  }
-
-  private async _loadTextures(): Promise<void> {
-    const sources: Record<string, string> = {
-      ...(GameConfig.ASSETS.IMAGES as Record<string, string>),
-      smoke:   '/assets/images/smoke.png',
-      skipDay: '/assets/images/skip_day.png',
-      icon:    '/assets/icon.png',
-    };
-    await Promise.all(Object.entries(sources).map(([k, url]) =>
-      new Promise<void>(resolve => {
-        const tex = PIXI.Texture.from(url);
-        this._textures.set(k, tex);
-        if (tex.baseTexture.valid) { resolve(); return; }
-        tex.baseTexture.once('loaded', () => resolve());
-        tex.baseTexture.once('error',  () => resolve());
-      })
-    ));
+    this._initPixi();
+    window.addEventListener('resize', () => this._pixi.renderer.resize(innerWidth, innerHeight));
   }
 
   // ════════════════════════════════════════════════════════════════
-  //  COIN HUD  (top-right)
+  //  STYLES
+  // ════════════════════════════════════════════════════════════════
+  private _injectStyles(): void {
+    const s = document.createElement('style');
+    s.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@600;700;800;900&display=swap');
+
+      :root {
+        --gm-green:      #3ddc68;
+        --gm-green-dark: #1a8c3a;
+        --gm-blue:       #4ab8ff;
+        --gm-blue-dark:  #1a6aaa;
+        --gm-gold:       #f5c430;
+        --gm-dark:       rgba(0,0,0,0.78);
+        --gm-radius:     14px;
+        --gm-font-title: 'Fredoka One', cursive;
+        --gm-font-body:  'Nunito', sans-serif;
+        --sb-w:          clamp(120px, 22vw, 180px);
+        --icon-size:     clamp(52px, 9vw, 72px);
+        --fs-label:      clamp(13px, 2.5vw, 17px);
+        --fs-cost:       clamp(11px, 2vw, 14px);
+      }
+
+      /* ── Coin HUD ──────────────────────────────────────────── */
+      #gm-coin-hud {
+        position:       absolute;
+        top:            clamp(10px,2vh,18px);
+        right:          clamp(10px,2vw,20px);
+        z-index:        40;
+        display:        flex;
+        align-items:    center;
+        gap:            8px;
+        background:     var(--gm-dark);
+        border-radius:  var(--gm-radius);
+        padding:        8px 16px 8px 10px;
+        border:         1px solid rgba(255,255,255,0.15);
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      #gm-coin-gem {
+        width:  clamp(26px,5vw,36px);
+        height: clamp(26px,5vw,36px);
+        object-fit: contain;
+        flex-shrink: 0;
+        filter: drop-shadow(0 0 6px rgba(100,255,150,0.5));
+      }
+      #gm-coin-val {
+        font-family: var(--gm-font-title);
+        font-size:   clamp(20px,4vw,30px);
+        color:       #fff;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      }
+
+      /* ── WATERMARK logo ────────────────────────────────────── */
+      #gm-watermark {
+        position:       absolute;
+        top:            clamp(8px,1.5vh,16px);
+        left:           clamp(8px,1.5vw,16px);
+        z-index:        40;
+        opacity:        0.55;
+        pointer-events: none;
+        width:          clamp(36px,6vw,60px);
+        height:         auto;
+        filter:         drop-shadow(0 2px 6px rgba(0,0,0,0.4));
+        transition:     opacity .3s;
+      }
+      #gm-watermark:hover { opacity: 0.85; }
+
+      /* ── LEFT SIDEBAR ─────────────────────────────────────── */
+      #gm-sidebar {
+        position:       absolute;
+        left:           0;
+        top:            50%;
+        transform:      translateY(-50%);
+        z-index:        40;
+        display:        flex;
+        flex-direction: column;
+        gap:            clamp(6px,1.2vh,10px);
+        padding:        clamp(8px,1.5vw,14px);
+        pointer-events: all;
+      }
+
+      .gm-sb-row {
+        display:        flex;
+        align-items:    center;
+        gap:            0;
+        position:       relative;
+      }
+
+      /* Main category button */
+      .gm-cat-btn {
+        width:           var(--icon-size);
+        height:          var(--icon-size);
+        border-radius:   var(--gm-radius);
+        border:          2px solid rgba(255,255,255,0.2);
+        background:      var(--gm-dark);
+        backdrop-filter: blur(8px);
+        cursor:          pointer;
+        display:         flex;
+        align-items:     center;
+        justify-content: center;
+        transition:      transform .18s, box-shadow .18s, border-color .18s;
+        position:        relative;
+        flex-shrink:     0;
+        overflow:        hidden;
+      }
+      .gm-cat-btn:hover  { transform: scale(1.07); border-color: rgba(255,255,255,0.5); }
+      .gm-cat-btn:active { transform: scale(0.95); }
+      .gm-cat-btn.active { border-color: var(--gm-green); box-shadow: 0 0 18px rgba(61,220,104,0.4); }
+      .gm-cat-btn img { width: 72%; height: 72%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,.4)); }
+
+      /* Small + badge on category icon */
+      .gm-cat-plus {
+        position:    absolute;
+        bottom:      3px; right: 3px;
+        width:       18px; height: 18px;
+        background:  var(--gm-green);
+        border-radius: 50%;
+        display:     flex; align-items: center; justify-content: center;
+        font-size:   14px; font-weight: 900; color: white; line-height:1;
+        box-shadow:  0 1px 4px rgba(0,0,0,.3);
+      }
+
+      /* Label next to button */
+      .gm-cat-label {
+        background:    var(--gm-dark);
+        backdrop-filter: blur(8px);
+        border:        1px solid rgba(255,255,255,0.15);
+        border-left:   none;
+        border-radius: 0 var(--gm-radius) var(--gm-radius) 0;
+        padding:       0 14px;
+        height:        var(--icon-size);
+        display:       flex;
+        align-items:   center;
+        font-family:   var(--gm-font-title);
+        font-size:     var(--fs-label);
+        color:         #fff;
+        white-space:   nowrap;
+        pointer-events: none;
+        transition:    opacity .2s, transform .2s;
+      }
+
+      /* Sub-menu that slides out right */
+      .gm-sub-menu {
+        position:   absolute;
+        left:       calc(var(--icon-size) + clamp(100px, 18vw, 145px));
+        top:        50%;
+        transform:  translateY(-50%) scaleX(0);
+        transform-origin: left center;
+        display:    flex;
+        flex-direction: column;
+        gap:        8px;
+        transition: transform .22s cubic-bezier(.34,1.56,.64,1);
+        pointer-events: none;
+        z-index:    50;
+      }
+      .gm-sub-menu.open {
+        transform:    translateY(-50%) scaleX(1);
+        pointer-events: all;
+      }
+
+      .gm-item-btn {
+        display:        flex;
+        align-items:    center;
+        gap:            10px;
+        background:     var(--gm-dark);
+        backdrop-filter: blur(8px);
+        border:         1px solid rgba(255,255,255,0.18);
+        border-radius:  var(--gm-radius);
+        padding:        8px 14px 8px 10px;
+        cursor:         pointer;
+        transition:     transform .15s, border-color .15s;
+        min-width:      clamp(140px,24vw,200px);
+        white-space:    nowrap;
+      }
+      .gm-item-btn:hover  { transform: translateX(5px); border-color: var(--gm-green); }
+      .gm-item-btn:active { transform: translateX(3px) scale(0.97); }
+      .gm-item-btn.selected { border-color: var(--gm-green); background: rgba(61,220,104,0.18); }
+      .gm-item-btn.no-coins { opacity: 0.45; cursor: not-allowed; }
+      .gm-item-btn img {
+        width:  clamp(32px,6vw,44px);
+        height: clamp(32px,6vw,44px);
+        object-fit: contain;
+        filter: drop-shadow(0 1px 3px rgba(0,0,0,.4));
+        flex-shrink: 0;
+      }
+      .gm-item-info { display: flex; flex-direction: column; }
+      .gm-item-name { font-family: var(--gm-font-title); font-size: var(--fs-label); color: #fff; }
+      .gm-item-cost {
+        font-family: var(--gm-font-body); font-size: var(--fs-cost); font-weight: 800;
+        color: var(--gm-gold); display: flex; align-items: center; gap: 3px;
+      }
+      .gm-item-cost-gem {
+        width:  18px;
+        height: 18px;
+        object-fit: contain;
+        vertical-align: middle;
+        margin-right: 2px;
+      }
+
+      /* Back button */
+      .gm-back-btn {
+        display:     flex;
+        align-items: center;
+        gap:         10px;
+        background:  rgba(80,80,80,0.8);
+        border:      1px solid rgba(255,255,255,0.15);
+        border-radius: var(--gm-radius);
+        padding:     8px 14px 8px 10px;
+        cursor:      pointer;
+        color:       rgba(255,255,255,0.7);
+        font-family: var(--gm-font-title);
+        font-size:   var(--fs-label);
+        transition:  background .15s;
+        white-space: nowrap;
+      }
+      .gm-back-btn:hover { background: rgba(100,100,100,0.8); }
+
+      /* ── PLACEMENT PROMPT ──────────────────────────────────── */
+      #gm-prompt {
+        position:       absolute;
+        top:            clamp(14px,2.5vh,22px);
+        left:           50%;
+        transform:      translateX(-50%);
+        background:     var(--gm-dark);
+        backdrop-filter: blur(10px);
+        border:         2px solid var(--gm-green);
+        border-radius:  var(--gm-radius);
+        padding:        10px 22px;
+        display:        none;
+        align-items:    center;
+        gap:            12px;
+        z-index:        40;
+        white-space:    nowrap;
+        animation:      gm-prompt-in .3s ease;
+        pointer-events: all;
+      }
+      @keyframes gm-prompt-in { from{opacity:0;transform:translateX(-50%) translateY(-8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+      #gm-prompt-text { font-family: var(--gm-font-title); font-size: clamp(14px,2.5vw,18px); color: #fff; }
+      #gm-prompt-cancel {
+        background: rgba(255,60,60,0.25); border: 1px solid rgba(255,100,100,0.4);
+        border-radius: 50%; width: 26px; height: 26px; cursor: pointer; color: #ff8888;
+        display: flex; align-items: center; justify-content: center; font-size: 14px;
+        transition: background .15s;
+      }
+      #gm-prompt-cancel:hover { background: rgba(255,60,60,0.5); }
+
+      /* ── TOASTS ────────────────────────────────────────────── */
+      #gm-toasts {
+        position:   absolute;
+        bottom:     clamp(80px,14vh,120px);
+        left:       50%;
+        transform:  translateX(-50%);
+        display:    flex;
+        flex-direction: column;
+        align-items: center;
+        gap:        6px;
+        z-index:    50;
+        pointer-events: none;
+      }
+      .gm-toast {
+        background:  var(--gm-dark);
+        border:      1px solid rgba(255,255,255,0.18);
+        border-radius: var(--gm-radius);
+        padding:     9px 20px;
+        color:       #fff;
+        font-family: var(--gm-font-title);
+        font-size:   clamp(13px,2.5vw,17px);
+        animation:   gm-tin .3s ease, gm-tout .35s ease 1.9s forwards;
+        white-space: nowrap;
+        backdrop-filter: blur(8px);
+      }
+      @keyframes gm-tin  { from{opacity:0;transform:scale(.85)} to{opacity:1;transform:scale(1)} }
+      @keyframes gm-tout { to{opacity:0;transform:scale(.85)} }
+
+
+      /* ════════════════════════════════════════════════════════
+         RESPONSIVE — portrait phone / small landscape
+         ════════════════════════════════════════════════════════ */
+
+      /* ── PORTRAIT (width < height) ─────────────────────────── */
+      @media (orientation: portrait) {
+        :root {
+          --icon-size:  clamp(48px, 12vw, 64px);
+          --fs-label:   clamp(12px, 3.5vw, 16px);
+          --fs-cost:    clamp(10px, 2.8vw, 14px);
+        }
+
+        /* Coin HUD — smaller, keep top-right */
+        #gm-coin-gem { width: clamp(22px,7vw,32px); height: clamp(22px,7vw,32px); }
+        #gm-coin-val { font-size: clamp(16px,5.5vw,26px); }
+
+        /* Sidebar moves to BOTTOM-LEFT in portrait */
+        #gm-sidebar {
+          left:      0;
+          top:       auto;
+          bottom:    0;
+          transform: none;
+          flex-direction: row;
+          padding:   clamp(6px,2vw,12px);
+          gap:       clamp(6px,2vw,10px);
+          align-items: flex-end;
+        }
+
+        .gm-sb-row {
+          flex-direction: column-reverse;
+          align-items: flex-start;
+        }
+
+        /* Labels: above the icon in portrait */
+        .gm-cat-label {
+          border-left:   1px solid rgba(255,255,255,0.15);
+          border-bottom: none;
+          border-radius: var(--gm-radius) var(--gm-radius) 0 0;
+          padding:       0 10px;
+          height:        auto;
+          padding-top:   6px;
+          padding-bottom: 6px;
+        }
+
+        /* Sub-menu opens UPWARD in portrait */
+        .gm-sub-menu {
+          position:       fixed !important;
+          left:           8px !important;
+          top:            auto !important;
+          bottom:         calc(var(--icon-size) + 20px) !important;
+          transform:      translateY(10px) scaleY(0);
+          transform-origin: bottom left;
+          flex-direction: column;
+          max-height:     55vh;
+          overflow-y:     auto;
+          opacity:        0;
+          transition:     transform .22s cubic-bezier(.34,1.56,.64,1), opacity .18s;
+        }
+        .gm-sub-menu.open {
+          transform:    translateY(0) scaleY(1);
+          opacity:      1;
+        }
+
+        /* Hide text labels in portrait to save horizontal space */
+        .gm-cat-label { display: none; }
+
+        /* Sidebar: fixed at bottom-left, horizontal row */
+        #gm-sidebar {
+          position: fixed !important;
+        }
+
+        /* Prompt — stays top-center but smaller text + no white-space nowrap */
+        #gm-prompt { white-space: normal; text-align: center; max-width: 80vw; padding: 8px 14px; }
+
+        /* Toasts — higher up so they don't overlap sidebar */
+        #gm-toasts { bottom: clamp(100px,20vh,160px); }
+      }
+
+      /* ── NARROW LANDSCAPE (height < 500px) ─────────────────── */
+      @media (orientation: landscape) and (max-height: 500px) {
+        :root {
+          --icon-size:  clamp(40px, 8vh, 56px);
+          --fs-label:   clamp(11px, 2.2vh, 15px);
+          --fs-cost:    clamp(10px, 1.8vh, 13px);
+        }
+        /* Sub-menu: keep left but allow overflow-y */
+        .gm-sub-menu {
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+        #gm-coin-val { font-size: clamp(14px,3.5vh,22px); }
+        #gm-coin-gem { width: clamp(20px,4.5vh,30px); height: clamp(20px,4.5vh,30px); }
+      }
+
+      /* ── VERY SMALL SCREENS (max-width 360px) ────────────────── */
+      @media (max-width: 360px) {
+        :root {
+          --icon-size: 44px;
+          --fs-label:  12px;
+          --fs-cost:   10px;
+        }
+        .gm-item-btn { min-width: 130px; padding: 6px 10px; }
+      }
+      /* ── Skip Day button ───────────────────────────────────── */
+      #gm-skip-day {
+        position:       absolute;
+        top:            calc(clamp(10px,2vh,18px) + clamp(52px,10vh,72px) + 8px);
+        right:          clamp(10px,2vw,20px);
+        z-index:        40;
+        width:          clamp(42px,8vw,56px);
+        height:         clamp(42px,8vw,56px);
+        border-radius:  var(--gm-radius);
+        border:         2px solid rgba(255,200,50,0.5);
+        background:     rgba(0,0,0,0.72);
+        backdrop-filter: blur(8px);
+        padding:        6px;
+        display:        none;
+        align-items:    center;
+        justify-content: center;
+        cursor:         pointer;
+        box-shadow:     0 0 18px rgba(255,200,50,0.3);
+        animation:      gm-skip-pulse 1.8s ease-in-out infinite;
+        transition:     transform .15s, box-shadow .15s;
+      }
+      #gm-skip-day:hover  { transform: scale(1.1); box-shadow: 0 0 28px rgba(255,200,50,0.6); }
+      #gm-skip-day:active { transform: scale(0.95); }
+      #gm-skip-day img    { width: 100%; height: 100%; object-fit: contain; }
+      @keyframes gm-skip-pulse {
+        0%,100% { border-color: rgba(255,200,50,0.4); box-shadow: 0 0 14px rgba(255,200,50,0.25); }
+        50%     { border-color: rgba(255,200,50,0.9); box-shadow: 0 0 28px rgba(255,200,50,0.55); }
+      }
+
+      /* ── Pixi canvas ────────────────────────────────────────── */
+      #gm-pixi { position:absolute;inset:0;z-index:45;pointer-events:none; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  //  BUILD DOM
   // ════════════════════════════════════════════════════════════════
   private _buildCoinHUD(): void {
-    this._coinHUD   = new PIXI.Container();
-    this._coinHUDBg = new PIXI.Graphics();
-    this._coinHUD.addChild(this._coinHUDBg);
+    const hud = document.createElement('div');
+    hud.id = 'gm-coin-hud';
+    hud.innerHTML = `<img id="gm-coin-gem" src="${GameConfig.ASSETS.IMAGES.money}" alt="coins"><div id="gm-coin-val">${this._coins}</div>`;
+    this._coinEl = hud.querySelector('#gm-coin-val')!;
+    this._root.appendChild(hud);
 
-    const gem = new PIXI.Sprite(this._textures.get('money') ?? PIXI.Texture.WHITE);
-    gem.anchor.set(0, 0.5);
-    gem.name = 'gem';
-    this._coinHUD.addChild(gem);
+    // ── Watermark logo top-left ─────────────────────────────────────
+    const wm = document.createElement('img');
+    wm.id  = 'gm-watermark';
+    wm.src = '/assets/icon.png';
+    wm.alt = '';
+    this._root.appendChild(wm);
 
-    this._coinText = new PIXI.Text(`${this._coins}`, {
-      fontFamily: FONT_TITLE, fontSize: 28, fill: 0xffffff,
-      dropShadow: true, dropShadowDistance: 2, dropShadowAlpha: 0.5,
-    });
-    this._coinText.anchor.set(0, 0.5);
-    this._coinHUD.addChild(this._coinText);
-
-    this._uiLayer.addChild(this._coinHUD);
-    this._layoutCoinHUD();
+    // ── Skip Day button (shown when no more moves) ────────────────
+    this._skipDayBtn = document.createElement('button');
+    this._skipDayBtn.id = 'gm-skip-day';
+    const skipImg = document.createElement('img');
+    skipImg.src = '/assets/images/skip_day.png';
+    skipImg.alt = 'Skip Day';
+    this._skipDayBtn.appendChild(skipImg);
+    this._root.appendChild(this._skipDayBtn);
   }
 
-  private _layoutCoinHUD(): void {
-    const portrait  = innerWidth < innerHeight;
-    const gemSz     = portrait ? 26 : 32;
-    const fontSize  = portrait ? 22 : 28;
-    const padV = 8, padH = 16, gap = 8;
-
-    const gem = this._coinHUD.getChildByName('gem') as PIXI.Sprite;
-    gem.width  = gemSz;
-    gem.height = gemSz;
-    gem.x = padH / 2;
-    gem.y = 0;
-
-    this._coinText.style.fontSize = fontSize;
-    this._coinText.x = gem.x + gemSz + gap;
-    this._coinText.y = 0;
-
-    const totalW = gem.x + gemSz + gap + this._coinText.width + padH / 2 + padH;
-    const totalH = gemSz + padV * 2;
-
-    this._coinHUDBg.clear();
-    this._coinHUDBg.lineStyle(1, 0xffffff, 0.15);
-    this._coinHUDBg.beginFill(0x000000, 0.78);
-    this._coinHUDBg.drawRoundedRect(0, -totalH / 2, totalW, totalH, 14);
-    this._coinHUDBg.endFill();
-
-    const margin = Math.max(10, innerWidth * 0.02);
-    const topMargin = Math.max(10, innerHeight * 0.02);
-    this._coinHUD.x = innerWidth  - totalW - margin;
-    this._coinHUD.y = topMargin + totalH / 2;
-  }
-
-  private _updateCoinText(): void {
-    this._coinText.text = `${this._coins}`;
-    this._layoutCoinHUD();
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  //  WATERMARK  (top-left)
-  // ════════════════════════════════════════════════════════════════
-  private _buildWatermark(): void {
-    this._watermark = new PIXI.Sprite(this._textures.get('icon') ?? PIXI.Texture.WHITE);
-    this._watermark.anchor.set(0, 0);
-    this._watermark.alpha = 0.55;
-    this._uiLayer.addChild(this._watermark);
-  }
-
-  private _layoutWatermark(): void {
-    const sz = Math.max(36, Math.min(innerWidth * 0.06, 60));
-    const margin = Math.max(8, innerWidth * 0.015);
-    this._watermark.width  = sz;
-    this._watermark.height = sz;
-    this._watermark.x = margin;
-    this._watermark.y = Math.max(8, innerHeight * 0.015);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  //  SKIP DAY  (top-right, below coin)
-  // ════════════════════════════════════════════════════════════════
-  private _buildSkipDay(): void {
-    this._skipDayBtn = new PIXI.Container();
-    this._skipDayBtn.visible = false;
-
-    // Filled background — drawn once in layout, never in the ticker
-    this._skipDayBg = new PIXI.Graphics();
-    this._skipDayBtn.addChild(this._skipDayBg);
-
-    const img = new PIXI.Sprite(this._textures.get('skipDay') ?? PIXI.Texture.WHITE);
-    img.anchor.set(0.5);
-    img.name = 'img';
-    this._skipDayBtn.addChild(img);
-
-    // Animated border — separate Graphics on top, only border is redrawn each frame
-    this._skipDayBorder = new PIXI.Graphics();
-    this._skipDayBtn.addChild(this._skipDayBorder);
-
-    this._skipDayBtn.eventMode = 'static';
-    this._skipDayBtn.cursor    = 'pointer';
-
-    this._skipDayBtn.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._skipDayBtn.scale.set(0.93);
-    });
-    this._skipDayBtn.on('pointerup', (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._skipDayBtn.scale.set(1);
-      if (this._skipDayHandler) this._skipDayHandler();
-    });
-    this._skipDayBtn.on('pointerover', () => this._skipDayBtn.scale.set(1.1));
-    this._skipDayBtn.on('pointerout',  () => this._skipDayBtn.scale.set(1));
-
-    // Pulse: only redraw the border Graphics using the stored fixed size
-    this._pixi.ticker.add((dt: number) => {
-      if (!this._skipDayBtn.visible) return;
-      this._skipDayT += dt / 60;
-      const a   = 0.35 + 0.55 * (Math.sin(this._skipDayT * Math.PI / 0.9) * 0.5 + 0.5);
-      const sz  = this._skipDaySz;  // fixed — never read container.width
-      this._skipDayBorder.clear();
-      this._skipDayBorder.lineStyle(2.5, 0xffc832, a);
-      this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
-    });
-
-    this._uiLayer.addChild(this._skipDayBtn);
-  }
-
-  private _layoutSkipDay(): void {
-    const sz     = Math.max(42, Math.min(innerWidth * 0.08, 56));
-    const margin = Math.max(10, innerWidth * 0.02);
-    this._skipDaySz = sz;   // store for ticker
-
-    // Static filled bg — no border here, border is handled by _skipDayBorder
-    this._skipDayBg.clear();
-    this._skipDayBg.beginFill(0x000000, 0.72);
-    this._skipDayBg.drawRoundedRect(0, 0, sz, sz, 14);
-    this._skipDayBg.endFill();
-
-    // Redraw border at correct size
-    this._skipDayBorder.clear();
-    this._skipDayBorder.lineStyle(2.5, 0xffc832, 0.5);
-    this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
-
-    const img = this._skipDayBtn.getChildByName('img') as PIXI.Sprite;
-    if (img) { img.width = sz - 14; img.height = sz - 14; img.x = sz / 2; img.y = sz / 2; }
-
-    // Position: top-right below coin HUD
-    const coinBottom = this._coinHUD.y + this._coinHUDBg.height / 2 + 8;
-    this._skipDayBtn.x = innerWidth - sz - margin;
-    this._skipDayBtn.y = coinBottom;
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  //  SIDEBAR
-  // ════════════════════════════════════════════════════════════════
   private _buildSidebar(): void {
-    this._sidebar  = new PIXI.Container();
-    this._sidebar.alpha = 0;  // hidden until tutorial done
-    this._catRows  = [];
+    this._sidebar = document.createElement('div');
+    this._sidebar.id = 'gm-sidebar';
 
-    const defs: Array<{ cat: ItemCategory; imgKey: ImgKey; label: string }> = [
-      { cat: 'crops',   imgKey: 'corn', label: 'Crop'   },
-      { cat: 'animals', imgKey: 'cow',  label: 'Cattle' },
-    ];
+    // Crop row
+    this._sidebar.appendChild(this._makeCatRow('crops', 'corn', 'Crop'));
+    // Animals row
+    this._sidebar.appendChild(this._makeCatRow('animals', 'cow', 'Cattle'));
 
-    defs.forEach(({ cat, imgKey, label }) => {
-      const row = this._makeCatRow(cat, imgKey, label);
-      this._catRows.push(row);
-      this._sidebar.addChild(row);
-    });
+    // Disabled until tutorial completes (enabled by TutorialState._finish)
+    this._sidebar.style.opacity       = '0';
+    this._sidebar.style.pointerEvents = 'none';
 
-    this._uiLayer.addChild(this._sidebar);
+    this._root.appendChild(this._sidebar);
   }
 
-  private _makeCatRow(cat: ItemCategory, imgKey: ImgKey, label: string): PIXI.Container {
-    const row = new PIXI.Container();
-    const SZ  = 64;
-    const RAD = 14;
+  private _makeCatRow(cat: ItemCategory, imgKey: ImgKey, label: string): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'gm-sb-row';
 
-    // ── Category button ────────────────────────────────────────
-    const btnCont = new PIXI.Container();
-    const btnBg   = new PIXI.Graphics();
-    this._drawCatBg(btnBg, SZ, false);
-    btnCont.addChild(btnBg);
+    // Icon button
+    const btn = document.createElement('div');
+    btn.className = 'gm-cat-btn';
+    btn.dataset.cat = cat;
+    btn.innerHTML = `
+      <img src="${GameConfig.ASSETS.IMAGES[imgKey]}" alt="${label}">
+      <div class="gm-cat-plus">+</div>
+    `;
 
-    const catImg = new PIXI.Sprite(this._textures.get(imgKey) ?? PIXI.Texture.WHITE);
-    catImg.anchor.set(0.5);
-    catImg.width  = SZ * 0.72;
-    catImg.height = SZ * 0.72;
-    catImg.x = SZ / 2;
-    catImg.y = SZ / 2;
-    btnCont.addChild(catImg);
-    this._catIconSprites[cat] = catImg;
+    // Label
+    const lbl = document.createElement('div');
+    lbl.className = 'gm-cat-label';
+    lbl.textContent = label;
 
-    // + badge
-    const badge = new PIXI.Graphics();
-    badge.beginFill(0x3ddc68); badge.drawCircle(0, 0, 9); badge.endFill();
-    badge.x = SZ - 5; badge.y = SZ - 5;
-    btnCont.addChild(badge);
-    const badgeTxt = new PIXI.Text('+', {
-      fontFamily: FONT_BODY, fontSize: 14, fontWeight: '900', fill: 0xffffff,
-    });
-    badgeTxt.anchor.set(0.5);
-    badgeTxt.x = SZ - 5; badgeTxt.y = SZ - 5;
-    btnCont.addChild(badgeTxt);
+    // Sub-menu (hidden)
+    const sub = document.createElement('div');
+    sub.className = 'gm-sub-menu';
+    sub.dataset.subcat = cat;
 
-    btnCont.eventMode = 'static';
-    btnCont.cursor    = 'pointer';
-    btnCont.hitArea   = new PIXI.Rectangle(0, 0, SZ, SZ);
-
-    const stopNative = (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-
-    btnCont.on('pointerdown', (e) => { stopNative(e); btnCont.scale.set(0.95); });
-    btnCont.on('pointerup',   (e) => { stopNative(e); btnCont.scale.set(1); });
-    btnCont.on('pointerover', () => { if (this._openCat !== cat) btnCont.scale.set(1.07); });
-    btnCont.on('pointerout',  () => { if (this._openCat !== cat) btnCont.scale.set(1); });
-    btnCont.on('pointertap',  (e) => {
-      stopNative(e);
-      this._toggleMenu(cat);
+    // Items in sub-menu
+    ItemCatalog[cat].forEach(item => {
+      const imgSrc = GameConfig.ASSETS.IMAGES[item.imageKey as ImgKey] ?? '';
+      const itemBtn = document.createElement('div');
+      itemBtn.className = 'gm-item-btn';
+      itemBtn.dataset.itemId = item.id;
+      itemBtn.innerHTML = `
+        <img src="${imgSrc}" alt="${item.name}">
+        <div class="gm-item-info">
+          <div class="gm-item-name">${item.name}</div>
+          <div class="gm-item-cost"><img class="gm-item-cost-gem" src="${GameConfig.ASSETS.IMAGES.money}" alt="$">${item.cost}</div>
+        </div>
+      `;
+      itemBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._selectItem(item, itemBtn);
+      });
+      sub.appendChild(itemBtn);
     });
 
-    this._catBtnConts[cat] = btnCont;
-    this._catBtnBgs[cat]   = btnBg;
-    row.addChild(btnCont);
+    // Back button at bottom of sub-menu
+    const back = document.createElement('div');
+    back.className = 'gm-back-btn';
+    back.innerHTML = '← Back';
+    back.addEventListener('click', (e) => { e.stopPropagation(); this._closeMenu(); });
+    sub.appendChild(back);
 
-    // ── Label ──────────────────────────────────────────────────
-    const lblW   = 80;
-    const lblGap = 6;   // gap between icon button and label
-    const lblBg  = new PIXI.Graphics();
-    lblBg.lineStyle(1, 0xffffff, 0.15);
-    lblBg.beginFill(0x000000, 0.78);
-    lblBg.drawRoundedRect(0, 0, lblW, SZ, RAD);
-    lblBg.endFill();
-    const lblCont = new PIXI.Container();
-    lblCont.addChild(lblBg);
-    const lblTxt = new PIXI.Text(label, {
-      fontFamily: FONT_TITLE, fontSize: 16, fill: 0xffffff,
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._toggleMenu(cat, btn, sub);
     });
-    lblTxt.anchor.set(0, 0.5);
-    lblTxt.x = 12; lblTxt.y = SZ / 2;
-    lblCont.addChild(lblTxt);
-    lblCont.x = SZ + lblGap;
-    lblCont.name = 'label';
-    row.addChild(lblCont);
 
-    // ── Sub-menu ───────────────────────────────────────────────
-    const sub = this._makeSubMenu(cat, SZ);
-    sub.visible = false;
-    this._catSubMenus[cat] = sub;
-    row.addChild(sub);
-
+    row.appendChild(btn);
+    row.appendChild(lbl);
+    row.appendChild(sub);
     return row;
   }
 
-  private _makeSubMenu(cat: ItemCategory, btnSz: number): PIXI.Container {
-    const sub    = new PIXI.Container();
-    const items  = ItemCatalog[cat];
-    const itemH  = 56;
-    const itemW  = 210;
-    const gap    = 8;
-    let yOff = 0;
-
-    items.forEach(item => {
-      const btn = this._makeItemBtn(item, itemW, itemH);
-      btn.y = yOff;
-      sub.addChild(btn);
-      yOff += itemH + gap;
-    });
-
-    // Back button
-    const backH  = 44;
-    const backBg = new PIXI.Graphics();
-    backBg.lineStyle(1, 0xffffff, 0.15);
-    backBg.beginFill(0x505050, 0.8);
-    backBg.drawRoundedRect(0, 0, itemW, backH, 14);
-    backBg.endFill();
-    const backTxt = new PIXI.Text('← Back', {
-      fontFamily: FONT_TITLE, fontSize: 16, fill: 'rgba(255,255,255,0.7)',
-    });
-    backTxt.anchor.set(0, 0.5);
-    backTxt.x = 14; backTxt.y = backH / 2;
-
-    const backCont = new PIXI.Container();
-    backCont.addChild(backBg, backTxt);
-    backCont.y = yOff;
-    backCont.eventMode = 'static';
-    backCont.cursor    = 'pointer';
-    backCont.hitArea   = new PIXI.Rectangle(0, 0, itemW, backH);
-    backCont.on('pointerdown', (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation());
-    backCont.on('pointertap',  (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._closeMenu();
-    });
-    backCont.on('pointerover', () => { backBg.tint = 0xcccccc; });
-    backCont.on('pointerout',  () => { backBg.tint = 0xffffff; });
-    sub.addChild(backCont);
-
-    return sub;
-  }
-
-  private _makeItemBtn(item: ItemData, w: number, h: number): PIXI.Container {
-    const cont = new PIXI.Container();
-    const bg   = new PIXI.Graphics();
-    this._drawItemBtnBg(bg, w, h, false, false);
-    cont.addChild(bg);
-    this._itemBtnBgs.set(item.id, bg);
-
-    const iconSz  = 40;
-    const imgKey  = item.imageKey as ImgKey;
-    const iconTex = this._textures.get(imgKey) ?? PIXI.Texture.WHITE;
-    const icon    = new PIXI.Sprite(iconTex);
-    icon.anchor.set(0.5);
-    icon.width  = iconSz;
-    icon.height = iconSz;
-    icon.x = 10 + iconSz / 2;
-    icon.y = h / 2;
-    cont.addChild(icon);
-
-    const nameTxt = new PIXI.Text(item.name, {
-      fontFamily: FONT_TITLE, fontSize: 16, fill: 0xffffff,
-    });
-    nameTxt.anchor.set(0, 1);
-    nameTxt.x = 10 + iconSz + 10;
-    nameTxt.y = h / 2 - 1;
-    cont.addChild(nameTxt);
-
-    // Cost row: gem icon + amount
-    const gemSz  = 16;
-    const gemTex = this._textures.get('money') ?? PIXI.Texture.WHITE;
-    const gemSpr = new PIXI.Sprite(gemTex);
-    gemSpr.anchor.set(0, 0.5);
-    gemSpr.width  = gemSz;
-    gemSpr.height = gemSz;
-    gemSpr.x = 10 + iconSz + 10;
-    gemSpr.y = h / 2 + 10;
-    cont.addChild(gemSpr);
-
-    const costTxt = new PIXI.Text(`${item.cost}`, {
-      fontFamily: FONT_BODY, fontSize: 13, fontWeight: '800', fill: 0xf5c430,
-    });
-    costTxt.anchor.set(0, 0.5);
-    costTxt.x = gemSpr.x + gemSz + 4;
-    costTxt.y = h / 2 + 10;
-    cont.addChild(costTxt);
-
-    // Interactivity
-    cont.eventMode = 'static';
-    cont.cursor    = 'pointer';
-    cont.hitArea   = new PIXI.Rectangle(0, 0, w, h);
-
-    const stopNative = (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-
-    cont.on('pointerdown', (e) => { stopNative(e); cont.scale.set(0.97); });
-    cont.on('pointerup',   (e) => { stopNative(e); cont.scale.set(1); });
-    cont.on('pointerover', () => {
-      if (this._selItem?.id !== item.id && this._coins >= item.cost) {
-        cont.x = 5;
-      }
-    });
-    cont.on('pointerout', () => {
-      if (this._selItem?.id !== item.id) cont.x = 0;
-    });
-    cont.on('pointertap', (e) => {
-      stopNative(e);
-      this._selectItem(item);
-    });
-
-    return cont;
-  }
-
-  private _drawCatBg(g: PIXI.Graphics, sz: number, active: boolean): void {
-    g.clear();
-    const borderColor = active ? 0x3ddc68 : 0xffffff;
-    const borderAlpha = active ? 1.0 : 0.2;
-    g.lineStyle(2, borderColor, borderAlpha);
-    g.beginFill(0x000000, 0.78);
-    g.drawRoundedRect(0, 0, sz, sz, 14);
-    g.endFill();
-  }
-
-  private _drawItemBtnBg(g: PIXI.Graphics, w: number, h: number,
-                          selected: boolean, noCoins: boolean): void {
-    g.clear();
-    const borderColor = selected ? 0x3ddc68 : 0xffffff;
-    const borderAlpha = selected ? 1.0 : 0.18;
-    const fillColor   = selected ? 0x3ddc68 : 0x000000;
-    const fillAlpha   = selected ? 0.18    : 0.78;
-    g.lineStyle(1, borderColor, borderAlpha);
-    g.beginFill(fillColor, fillAlpha);
-    g.drawRoundedRect(0, 0, w, h, 14);
-    g.endFill();
-    if (noCoins) { g.alpha = 0.45; } else { g.alpha = 1; }
-  }
-
-  // ── Menu open / close ──────────────────────────────────────────
-  private _toggleMenu(cat: ItemCategory): void {
-    if (this._openCat === cat) { this._closeMenu(); return; }
+  private _toggleMenu(cat: ItemCategory, btn: HTMLElement, sub: HTMLElement): void {
+    const isOpen = sub.classList.contains('open');
     this._closeMenu();
-    this._openCat = cat;
-
-    const sub  = this._catSubMenus[cat];
-    const btnB = this._catBtnBgs[cat];
-    this._drawCatBg(btnB, 64, true);
-    sub.visible = true;
-    this._positionSubMenu(cat);
-    this._refreshSubMenu(cat);
+    if (!isOpen) {
+      sub.classList.add('open');
+      btn.classList.add('active');
+      this._openCat = cat;
+      this._menuOpen = true;
+      // Refresh cost highlights
+      this._refreshSubMenu(sub);
+    }
   }
 
   private _closeMenu(): void {
-    if (!this._openCat) return;
-    const cat  = this._openCat;
-    this._openCat = null;
-    this._catSubMenus[cat].visible = false;
-    this._drawCatBg(this._catBtnBgs[cat], 64, false);
-    this._catBtnConts[cat].scale.set(1);
+    document.querySelectorAll('.gm-sub-menu').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.gm-cat-btn').forEach(el => el.classList.remove('active'));
+    this._menuOpen  = false;
+    this._openCat   = null;
   }
 
-  /** Position the open submenu based on current orientation. */
-  private _positionSubMenu(cat: ItemCategory): void {
-    const portrait = innerWidth < innerHeight;
-    const sub  = this._catSubMenus[cat];
-    const row  = this._catRows[cat === 'crops' ? 0 : 1];
-    const lbl  = row.getChildByName('label') as PIXI.Container | null;
-
-    if (portrait) {
-      // Opens upward: position above the sidebar (which is at bottom)
-      const totalSubH = sub.height;
-      sub.x = 0;
-      sub.y = -(totalSubH + 8);
-    } else {
-      // Landscape: opens to the right
-      const lblW = lbl ? (lbl.width + 4) : 88;
-      sub.x = 64 + lblW;
-      sub.y = -sub.height / 2 + 32;
-    }
-  }
-
-  private _refreshSubMenu(cat: ItemCategory): void {
-    const sub = this._catSubMenus[cat];
-    ItemCatalog[cat].forEach(item => {
-      const bg = this._itemBtnBgs.get(item.id);
-      if (!bg) return;
-      const selected = this._selItem?.id === item.id;
-      const noCoins  = this._coins < item.cost;
-      this._drawItemBtnBg(bg, 210, 56, selected, noCoins);
-      const parent = bg.parent as PIXI.Container;
-      parent.alpha = noCoins ? 0.5 : 1;
+  private _refreshSubMenu(sub: HTMLElement): void {
+    sub.querySelectorAll<HTMLElement>('.gm-item-btn').forEach(btn => {
+      const id   = btn.dataset.itemId!;
+      const item = Object.values(ItemCatalog).flat().find(i => i.id === id);
+      if (!item) return;
+      btn.classList.toggle('no-coins', this._coins < item.cost);
+      btn.classList.toggle('selected', this._selItem?.id === id);
     });
-    // Force position refresh
-    this._positionSubMenu(cat);
-    void sub;
   }
 
-  private _selectItem(item: ItemData): void {
+  private _selectItem(item: ItemData, btn: HTMLElement): void {
     if (this._coins < item.cost) {
       this.showToast(`❌ Need ${item.cost} coins!`);
-      this._shakeCoinHUD();
+      this._shake(document.getElementById('gm-coin-val')!);
       return;
     }
-
     this._selItem = item;
+    document.querySelectorAll('.gm-item-btn').forEach(el => el.classList.remove('selected'));
+    btn.classList.add('selected');
 
-    // Update all item button visuals
-    const allCats: ItemCategory[] = ['crops', 'animals'];
-    allCats.forEach(c => {
-      ItemCatalog[c].forEach(i => {
-        const bg = this._itemBtnBgs.get(i.id);
-        if (bg) this._drawItemBtnBg(bg, 210, 56, i.id === item.id, this._coins < i.cost);
-      });
-    });
-
-    // Update cat icon to selected item
-    const iconKey = item.imageKey as ImgKey;
-    const cat     = item.zone === 'fence' ? 'animals' : 'crops';
-    const newTex  = this._textures.get(iconKey) ?? PIXI.Texture.WHITE;
-    this._catIconSprites[cat].texture = newTex;
+    // Update the category button image to reflect the selected item
+    const cat = item.zone === 'fence' ? 'animals' : 'crops';
+    const catBtn = document.querySelector<HTMLElement>(`.gm-cat-btn[data-cat="${cat}"] img`);
+    if (catBtn) (catBtn as HTMLImageElement).src = (GameConfig.ASSETS.IMAGES as any)[item.imageKey] ?? (catBtn as HTMLImageElement).src;
 
     this._closeMenu();
-    this._showPrompt(item);
+
+    // Show placement prompt
+    const text = document.getElementById('gm-prompt-text')!;
+    text.innerHTML = `${this._itemEmoji(item.id)} Place <strong>${item.name}</strong> ${item.zone === 'fence' ? 'in the pen' : 'in the field'}`;
+    (this._prompt.style as any).display = 'flex';
     this.emit('itemSelected', item);
   }
 
-  // ── Layout ─────────────────────────────────────────────────────
-  private _layoutSidebar(): void {
-    const portrait = innerWidth < innerHeight;
-    const SZ       = portrait ? 52 : 64;
-    const gap      = portrait ? 8  : 10;
-    const margin   = portrait ? 6  : 8;
-
-    // Resize cat buttons
-    (['crops', 'animals'] as ItemCategory[]).forEach(cat => {
-      const bg = this._catBtnBgs[cat];
-      this._drawCatBg(bg, SZ, this._openCat === cat);
-      const icon = this._catIconSprites[cat];
-      icon.width  = SZ * 0.72;
-      icon.height = SZ * 0.72;
-      icon.x = SZ / 2; icon.y = SZ / 2;
-      this._catBtnConts[cat].hitArea = new PIXI.Rectangle(0, 0, SZ, SZ);
-    });
-
-    if (portrait) {
-      // Bottom-left horizontal layout
-      this._sidebar.x = margin;
-      this._sidebar.y = innerHeight - SZ - margin;
-
-      this._catRows.forEach((row, i) => {
-        row.x = i * (SZ + gap);
-        row.y = 0;
-        const lbl = row.getChildByName('label') as PIXI.Container | null;
-        if (lbl) lbl.visible = false;
-      });
-    } else {
-      // Left side, vertically centered
-      const totalH = this._catRows.length * SZ + (this._catRows.length - 1) * gap;
-      this._sidebar.x = margin;
-      this._sidebar.y = (innerHeight - totalH) / 2;
-
-      this._catRows.forEach((row, i) => {
-        row.x = 0;
-        row.y = i * (SZ + gap);
-        const lbl = row.getChildByName('label') as PIXI.Container | null;
-        if (lbl) lbl.visible = true;
-      });
-    }
-
-    // Reposition any open submenu
-    if (this._openCat) this._positionSubMenu(this._openCat);
-  }
-
   // ════════════════════════════════════════════════════════════════
-  //  PLACEMENT PROMPT  (top-center)
+  //  PROMPT / CANCEL
   // ════════════════════════════════════════════════════════════════
   private _buildPrompt(): void {
-    this._prompt = new PIXI.Container();
-    this._prompt.visible = false;
-
-    // built lazily on first show; store background reference
-    this._uiLayer.addChild(this._prompt);
+    this._prompt = document.createElement('div');
+    this._prompt.id = 'gm-prompt';
+    this._prompt.innerHTML = `
+      <div id="gm-prompt-text"></div>
+      <div id="gm-prompt-cancel">✕</div>
+    `;
+    this._prompt.querySelector('#gm-prompt-cancel')!
+      .addEventListener('click', () => this.clearSelection());
+    this._root.appendChild(this._prompt);
   }
 
-  private _showPrompt(item: ItemData): void {
-    this._prompt.removeChildren();
-
-    const emoji = this._itemEmoji(item.id);
-    const zone  = item.zone === 'fence' ? 'in the pen' : 'in the field';
-    const msg   = `${emoji} Place ${item.name} ${zone}`;
-
-    const padV = 12, padH = 22, gap = 14;
-
-    const text = new PIXI.Text(msg, {
-      fontFamily: FONT_TITLE, fontSize: 17, fill: 0xffffff,
-    });
-    text.anchor.set(0, 0.5);
-    this._promptText = text;
-
-    const cancelSz = 26;
-    const totalW = padH + text.width + gap + cancelSz + padH;
-    const totalH = Math.max(text.height + padV * 2, cancelSz + padV * 2);
-
-    const bg = new PIXI.Graphics();
-    bg.lineStyle(2, 0x3ddc68, 1);
-    bg.beginFill(0x000000, 0.78);
-    bg.drawRoundedRect(0, 0, totalW, totalH, 14);
-    bg.endFill();
-
-    text.x = padH;
-    text.y = totalH / 2;
-
-    // Cancel button
-    const cancelBg = new PIXI.Graphics();
-    cancelBg.lineStyle(1, 0xff8888, 0.4);
-    cancelBg.beginFill(0xff3c3c, 0.25);
-    cancelBg.drawCircle(cancelSz / 2, cancelSz / 2, cancelSz / 2);
-    cancelBg.endFill();
-    const cancelTxt = new PIXI.Text('✕', {
-      fontFamily: FONT_BODY, fontSize: 14, fill: 0xff8888,
-    });
-    cancelTxt.anchor.set(0.5);
-    cancelTxt.x = cancelSz / 2;
-    cancelTxt.y = cancelSz / 2;
-    const cancelCont = new PIXI.Container();
-    cancelCont.addChild(cancelBg, cancelTxt);
-    cancelCont.x = padH + text.width + gap;
-    cancelCont.y = (totalH - cancelSz) / 2;
-    cancelCont.eventMode = 'static';
-    cancelCont.cursor    = 'pointer';
-    cancelCont.hitArea   = new PIXI.Rectangle(0, 0, cancelSz, cancelSz);
-    cancelCont.on('pointerdown', (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation());
-    cancelCont.on('pointertap', (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this.clearSelection();
-    });
-    cancelCont.on('pointerover', () => { cancelBg.tint = 0xee6666; });
-    cancelCont.on('pointerout',  () => { cancelBg.tint = 0xffffff; });
-
-    this._prompt.addChild(bg, text, cancelCont);
-    this._prompt.visible = true;
-    this._layoutPrompt();
-  }
-
-  private _layoutPrompt(): void {
-    if (!this._prompt.visible) return;
-    const margin = Math.max(14, innerHeight * 0.025);
-    this._prompt.x = (innerWidth - this._prompt.width) / 2;
-    this._prompt.y = margin;
+  clearSelection(): void {
+    this._selItem = null;
+    (this._prompt.style as any).display = 'none';
+    document.querySelectorAll('.gm-item-btn').forEach(el => el.classList.remove('selected'));
+    // Revert cat button images to defaults
+    const cropBtn = document.querySelector<HTMLImageElement>('.gm-cat-btn[data-cat="crops"] img');
+    const animBtn = document.querySelector<HTMLImageElement>('.gm-cat-btn[data-cat="animals"] img');
+    if (cropBtn) cropBtn.src = GameConfig.ASSETS.IMAGES.corn;
+    if (animBtn) animBtn.src = GameConfig.ASSETS.IMAGES.cow;
+    this.emit('itemSelected', null);
   }
 
   // ════════════════════════════════════════════════════════════════
   //  TOASTS
   // ════════════════════════════════════════════════════════════════
-  private _buildToastLayer(): void {
-    this._toastLayer = new PIXI.Container();
-    this._uiLayer.addChild(this._toastLayer);
+  private _buildToasts(): void {
+    this._toastWrap = document.createElement('div');
+    this._toastWrap.id = 'gm-toasts';
+    this._root.appendChild(this._toastWrap);
   }
 
   showToast(msg: string): void {
-    const padV = 10, padH = 20;
-
-    const txt = new PIXI.Text(msg, {
-      fontFamily: FONT_TITLE, fontSize: 16, fill: 0xffffff,
-    });
-    txt.anchor.set(0.5, 0.5);
-
-    const tw = txt.width + padH * 2;
-    const th = txt.height + padV * 2;
-
-    const bg = new PIXI.Graphics();
-    bg.lineStyle(1, 0xffffff, 0.18);
-    bg.beginFill(0x000000, 0.78);
-    bg.drawRoundedRect(0, 0, tw, th, 14);
-    bg.endFill();
-
-    const toast = new PIXI.Container();
-    txt.x = tw / 2; txt.y = th / 2;
-    toast.addChild(bg, txt);
-    toast.alpha = 0;
-    toast.x = -tw / 2;
-
-    this._toastLayer.addChild(toast);
-    this._layoutToasts();
-
-    // Animate: fade in (0.3s) → hold (1.65s) → fade out (0.35s)
-    let elapsed = 0;
-    const total = 2.3;
-    const fadeIn = 0.3, fadeOut = 0.35;
-    const fn = (dt: number) => {
-      elapsed += dt / 60;
-      if (elapsed < fadeIn) {
-        toast.alpha = elapsed / fadeIn;
-      } else if (elapsed < total - fadeOut) {
-        toast.alpha = 1;
-      } else {
-        toast.alpha = Math.max(0, (total - elapsed) / fadeOut);
-      }
-      if (elapsed >= total) {
-        this._pixi.ticker.remove(fn);
-        this._toastLayer.removeChild(toast);
-        this._layoutToasts();
-      }
-    };
-    this._pixi.ticker.add(fn);
-  }
-
-  private _layoutToasts(): void {
-    const portrait = innerWidth < innerHeight;
-    const baseY    = portrait ? innerHeight * 0.80 : innerHeight - 120;
-    this._toastLayer.x = innerWidth / 2;
-    this._toastLayer.y = baseY;
-
-    // Stack from bottom up
-    let yOff = 0;
-    for (let i = this._toastLayer.children.length - 1; i >= 0; i--) {
-      const t = this._toastLayer.children[i] as PIXI.Container;
-      t.y = yOff;
-      yOff -= (t.height + 6);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  //  UPGRADE MODAL
-  // ════════════════════════════════════════════════════════════════
-  private _buildUpgradeModal(): void {
-    this._upgradeModal = new PIXI.Container();
-    this._upgradeModal.visible = false;
-
-    // Backdrop
-    const backdrop = new PIXI.Graphics();
-    backdrop.beginFill(0x000000, 0.72);
-    backdrop.drawRect(0, 0, innerWidth, innerHeight);
-    backdrop.endFill();
-    backdrop.name = 'backdrop';
-    backdrop.eventMode = 'static';
-    backdrop.on('pointertap', (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._hideUpgradeModal();
-    });
-    this._upgradeModal.addChild(backdrop);
-
-    // Box
-    const boxW  = Math.min(480, innerWidth * 0.88);
-    const boxH  = 280;
-    const boxBg = new PIXI.Graphics();
-    boxBg.lineStyle(2, 0x3ddc68, 0.6);
-    boxBg.beginFill(0x080c08, 0.96);
-    boxBg.drawRoundedRect(0, 0, boxW, boxH, 20);
-    boxBg.endFill();
-    boxBg.name = 'boxBg';
-
-    const emoji = new PIXI.Text('🌟', {
-      fontFamily: FONT_BODY, fontSize: 52,
-    });
-    emoji.anchor.set(0.5, 0);
-    emoji.x = boxW / 2; emoji.y = 24;
-
-    const title = new PIXI.Text("You're on a roll!", {
-      fontFamily: FONT_TITLE, fontSize: 28, fill: 0xffffff,
-    });
-    title.anchor.set(0.5, 0);
-    title.x = boxW / 2; title.y = 86;
-
-    this._upgradeSubText = new PIXI.Text('', {
-      fontFamily: FONT_BODY, fontSize: 16, fontWeight: '700',
-      fill: 'rgba(255,255,255,0.73)', wordWrap: true, wordWrapWidth: boxW - 64,
-      align: 'center',
-    });
-    this._upgradeSubText.anchor.set(0.5, 0);
-    this._upgradeSubText.x = boxW / 2; this._upgradeSubText.y = 128;
-
-    // CTA button
-    const ctaW = 200, ctaH = 48;
-    const ctaBg = new PIXI.Graphics();
-    ctaBg.beginFill(0x3ddc68);
-    ctaBg.drawRoundedRect(0, 0, ctaW, ctaH, 50);
-    ctaBg.endFill();
-    const ctaTxt = new PIXI.Text('🛒 Get Full Version', {
-      fontFamily: FONT_TITLE, fontSize: 18, fill: 0xffffff,
-    });
-    ctaTxt.anchor.set(0.5);
-    ctaTxt.x = ctaW / 2; ctaTxt.y = ctaH / 2;
-    const ctaCont = new PIXI.Container();
-    ctaCont.addChild(ctaBg, ctaTxt);
-    ctaCont.x = (boxW - ctaW) / 2;
-    ctaCont.y = 192;
-    ctaCont.eventMode = 'static';
-    ctaCont.cursor    = 'pointer';
-    ctaCont.on('pointerdown', (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation());
-    ctaCont.on('pointerover', () => ctaCont.scale.set(1.05));
-    ctaCont.on('pointerout',  () => ctaCont.scale.set(1));
-    ctaCont.on('pointertap',  (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation());
-
-    // Dismiss
-    const dismissTxt = new PIXI.Text('Maybe later', {
-      fontFamily: FONT_BODY, fontSize: 13, fontWeight: '700',
-      fill: 'rgba(255,255,255,0.4)',
-    });
-    dismissTxt.anchor.set(0.5, 0);
-    dismissTxt.x = boxW / 2; dismissTxt.y = 248;
-    dismissTxt.eventMode = 'static';
-    dismissTxt.cursor    = 'pointer';
-    dismissTxt.on('pointerdown', (e: PIXI.FederatedPointerEvent) =>
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation());
-    dismissTxt.on('pointertap',  (e: PIXI.FederatedPointerEvent) => {
-      (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._hideUpgradeModal();
-    });
-    dismissTxt.on('pointerover', () => { dismissTxt.style.fill = 'rgba(255,255,255,0.8)'; });
-    dismissTxt.on('pointerout',  () => { dismissTxt.style.fill = 'rgba(255,255,255,0.4)'; });
-
-    const box = new PIXI.Container();
-    box.addChild(boxBg, emoji, title, this._upgradeSubText, ctaCont, dismissTxt);
-    box.name = 'box';
-    this._upgradeModal.addChild(box);
-
-    this._overlayLayer.addChild(this._upgradeModal);
-    this._layoutUpgradeModal();
-  }
-
-  private _layoutUpgradeModal(): void {
-    const backdrop = this._upgradeModal.getChildByName('backdrop') as PIXI.Graphics;
-    if (backdrop) {
-      backdrop.clear();
-      backdrop.beginFill(0x000000, 0.72);
-      backdrop.drawRect(0, 0, innerWidth, innerHeight);
-      backdrop.endFill();
-      backdrop.hitArea = new PIXI.Rectangle(0, 0, innerWidth, innerHeight);
-    }
-    const box = this._upgradeModal.getChildByName('box') as PIXI.Container;
-    if (box) {
-      box.x = (innerWidth  - box.width)  / 2;
-      box.y = (innerHeight - box.height) / 2;
-    }
-  }
-
-  showUpgradeModal(type: 'animals' | 'plants'): void {
-    if (type === 'animals') {
-      this._upgradeSubText.text =
-        `You've placed all ${GameConfig.MAX_ANIMALS} free animals.\nUnlock unlimited animals in the full game!`;
-    } else {
-      this._upgradeSubText.text =
-        `You've placed all ${GameConfig.MAX_PLANTS} free crops.\nUnlock unlimited crops in the full game!`;
-    }
-    this._layoutUpgradeModal();
-    this._upgradeModal.visible = true;
-
-    // Pop-in animation
-    const box = this._upgradeModal.getChildByName('box') as PIXI.Container;
-    if (!box) return;
-    box.scale.set(0.8); box.alpha = 0;
-    let t = 0;
-    const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.35, 1);
-      const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
-      const s = lerp(0.8, 1, ease);
-      box.scale.set(s);
-      box.alpha = t;
-      if (t >= 1) this._pixi.ticker.remove(fn);
-    };
-    this._pixi.ticker.add(fn);
-  }
-
-  private _hideUpgradeModal(): void {
-    this._upgradeModal.visible = false;
+    const t = document.createElement('div');
+    t.className = 'gm-toast';
+    t.textContent = msg;
+    this._toastWrap.appendChild(t);
+    setTimeout(() => t.remove(), 2300);
   }
 
   // ════════════════════════════════════════════════════════════════
   //  PUBLIC API
   // ════════════════════════════════════════════════════════════════
-  clearSelection(): void {
-    this._selItem = null;
-    this._prompt.visible = false;
-
-    // Reset all item button visuals
-    (['crops', 'animals'] as ItemCategory[]).forEach(cat => {
-      ItemCatalog[cat].forEach(item => {
-        const bg = this._itemBtnBgs.get(item.id);
-        if (bg) this._drawItemBtnBg(bg, 210, 56, false, this._coins < item.cost);
-      });
-      // Reset cat icon to default
-      const defKey = this._catDefaultImg[cat] as string;
-      const defTex = PIXI.Texture.from(defKey);
-      this._catIconSprites[cat].texture = defTex;
-    });
-
-    this.emit('itemSelected', null);
-  }
-
   onItemPlaced(name: string, cost: number, sx?: number, sy?: number): void {
     this._coins = Math.max(0, this._coins - cost);
-    this._updateCoinText();
-    this._bounceCoinHUD();
-    this._prompt.visible = false;
+    this._coinEl.textContent = `${this._coins}`;
+    this._bounce(this._coinEl.parentElement!);
+    (this._prompt.style as any).display = 'none';
     this._selItem = null;
     this.showToast(`✨ ${name} placed!`);
     if (sx !== undefined && sy !== undefined) this._spawnSparkles(sx, sy);
   }
 
-  showSkipDay(onClick: () => void): void {
-    this._skipDayHandler = onClick;
-    this._skipDayBtn.visible = true;
-    this._layoutSkipDay();
-  }
-
-  hideSkipDay(): void {
-    this._skipDayBtn.visible = false;
-  }
-
-  incrementCount(zone: 'field' | 'fence'): void {
-    if (zone === 'fence') this._animalCount++;
-    else                  this._plantCount++;
-  }
-
-  /** Show sidebar — called by TutorialState when tutorial completes. */
-  showSidebar(): void {
-    let t = 0;
-    const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.6, 1);
-      this._sidebar.alpha = t;
-      if (t >= 1) this._pixi.ticker.remove(fn);
-    };
-    this._pixi.ticker.add(fn);
-  }
-
-  updateMuteIcon(_muted: boolean): void {}
+  updateMuteIcon(_muted: boolean): void {}   // optional
   updateDNIcon(_isDay: boolean):   void {}
 
+  get selectedItem(): ItemData | null { return this._selItem; }
+  get coins():        number          { return this._coins; }
+
   // ════════════════════════════════════════════════════════════════
-  //  RESIZE
+  //  PIXI (sparkles)
   // ════════════════════════════════════════════════════════════════
-  private _onResize(): void {
-    this._pixi.renderer.resize(innerWidth, innerHeight);
-    this._layoutCoinHUD();
-    this._layoutWatermark();
-    this._layoutSkipDay();
-    this._layoutSidebar();
-    this._layoutPrompt();
-    this._layoutToasts();
-    this._layoutUpgradeModal();
+  private _smokeTexture: PIXI.Texture | null = null;
+
+  private _initPixi(): void {
+    this._pixi = new PIXI.Application({ width: innerWidth, height: innerHeight,
+      backgroundAlpha: 0, autoDensity: true, resolution: Math.min(devicePixelRatio,2) as any });
+    const cv = this._pixi.view as HTMLCanvasElement;
+    cv.id = 'gm-pixi';
+    this._root.appendChild(cv);
+    // Preload smoke texture
+    this._smokeTexture = PIXI.Texture.from('/assets/images/smoke.png');
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  SPARKLES  (PixiJS particle effect)
-  // ════════════════════════════════════════════════════════════════
   private _spawnSparkles(sx: number, sy: number): void {
     const tex = this._smokeTexture ?? PIXI.Texture.from('/assets/images/smoke.png');
-
     type Puff = { s: PIXI.Sprite; vx: number; vy: number; vr: number; life: number; maxLife: number };
     const puffs: Puff[] = [];
 
+    // 6 smoke puffs burst outward then rise
     for (let i = 0; i < 6; i++) {
-      const s    = new PIXI.Sprite(tex);
+      const s = new PIXI.Sprite(tex);
       s.anchor.set(0.5);
       const size = 40 + Math.random() * 40;
-      s.width  = size; s.height = size;
+      s.width  = size;
+      s.height = size;
       s.position.set(sx + (Math.random()-0.5)*20, sy + (Math.random()-0.5)*10);
-      s.alpha  = 0;
-      this._fxLayer.addChild(s);
+      s.alpha   = 0;
+      s.tint    = 0xffffff;
+      s.blendMode = PIXI.BLEND_MODES.NORMAL;
+      this._pixi.stage.addChild(s);
 
-      const angle = -Math.PI/2 + (Math.random()-0.5)*Math.PI;
-      const speed = 30 + Math.random() * 50;
-      const life  = 0.55 + Math.random() * 0.35;
-      puffs.push({ s, life, maxLife: life,
-        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
-        vr: (Math.random()-0.5)*1.5 });
+      const angle  = -Math.PI/2 + (Math.random()-0.5)*Math.PI; // mostly upward
+      const speed  = 30 + Math.random() * 50;
+      const life   = 0.55 + Math.random() * 0.35;
+      puffs.push({
+        s, life, maxLife: life,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        vr: (Math.random()-0.5) * 1.5,
+      });
     }
 
-    const fn = (dt: number) => {
-      const delta = dt / 60;
+    const fn = (d: number) => {
+      const dt = d / 60;
       let done = true;
       puffs.forEach(p => {
         if (p.life <= 0) { p.s.alpha = 0; return; }
         done = false;
-        p.life -= delta;
-        const t = p.life / p.maxLife;
-        p.s.alpha    = t < 0.8 ? t/0.8*0.8 : (1-t)/0.2*0.8;
-        p.s.x       += p.vx * delta;
-        p.s.y       += p.vy * delta;
-        p.vy        -= 15 * delta;
-        p.s.rotation += p.vr * delta;
-        p.s.scale.set(1 + (1-t)*1.2);
+        p.life -= dt;
+        const t = p.life / p.maxLife;          // 1→0 as it dies
+        // fade in quickly then fade out
+        p.s.alpha = t < 0.8 ? t / 0.8 * 0.8 : (1 - t) / 0.2 * 0.8;
+        p.s.x += p.vx * dt;
+        p.s.y += p.vy * dt;
+        p.vy  -= 15 * dt;                      // slight upward drift
+        p.s.rotation += p.vr * dt;
+        const sc = 1 + (1 - t) * 1.2;         // grows as it fades
+        p.s.scale.set(sc);
       });
       if (done) {
-        puffs.forEach(p => this._fxLayer.removeChild(p.s));
+        puffs.forEach(p => this._pixi.stage.removeChild(p.s));
         this._pixi.ticker.remove(fn);
       }
     };
@@ -1111,32 +759,169 @@ export class UIManager extends EventEmitter {
   //  HELPERS
   // ════════════════════════════════════════════════════════════════
   private _itemEmoji(id: string): string {
-    const m: Record<string, string> = {
+    const m: Record<string,string> = {
       chicken:'🐔', cow:'🐄', sheep:'🐑',
       corn:'🌽', grape:'🍇', strawberry:'🍓', tomato:'🍅',
     };
-    return m[id] ?? '🌱';
+    return m[id]??'🌱';
   }
 
-  private _bounceCoinHUD(): void {
-    let t = 0;
-    const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.35, 1);
-      const s = 1 + 0.2 * Math.sin(t * Math.PI);
-      this._coinHUD.scale.set(s);
-      if (t >= 1) { this._coinHUD.scale.set(1); this._pixi.ticker.remove(fn); }
-    };
-    this._pixi.ticker.add(fn);
+  private _bounce(el: HTMLElement): void {
+    el.animate([{transform:'scale(1)'},{transform:'scale(1.2)'},{transform:'scale(1)'}],
+      {duration:350,easing:'ease-out'});
   }
 
-  private _shakeCoinHUD(): void {
-    const origX = this._coinHUD.x;
-    let t = 0;
-    const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.3, 1);
-      this._coinHUD.x = origX + Math.sin(t * Math.PI * 5) * 6 * (1 - t);
-      if (t >= 1) { this._coinHUD.x = origX; this._pixi.ticker.remove(fn); }
-    };
-    this._pixi.ticker.add(fn);
+  private _shake(el: HTMLElement): void {
+    el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},
+      {transform:'translateX(5px)'},{transform:'translateX(0)'}],{duration:300});
   }
+  // (class continues below)
+
+  // ════════════════════════════════════════════════════════════════
+  //  UPGRADE POPUP — shown when limits reached
+  // ════════════════════════════════════════════════════════════════
+  private _buildUpgradeModal(): void {
+    this._upgradeModal = document.createElement('div');
+    Object.assign(this._upgradeModal.style, {
+      position:       'absolute', inset: '0',
+      background:     'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(6px)',
+      display:        'none',
+      alignItems:     'center',
+      justifyContent: 'center',
+      zIndex:         '60',
+      cursor:         'pointer',
+    });
+
+    const box = document.createElement('div');
+    Object.assign(box.style, {
+      background:     'rgba(10,24,10,0.96)',
+      border:         '2px solid rgba(61,220,104,0.6)',
+      borderRadius:   '20px',
+      padding:        'clamp(28px,5vw,48px) clamp(28px,6vw,60px)',
+      textAlign:      'center',
+      maxWidth:       'min(480px,88vw)',
+      boxShadow:      '0 12px 60px rgba(0,0,0,0.7), 0 0 40px rgba(61,220,104,0.15)',
+      animation:      'gm-upgrade-in .35s cubic-bezier(.34,1.56,.64,1)',
+    });
+
+    // Inject keyframe once
+    if (!document.getElementById('gm-upgrade-style')) {
+      const s = document.createElement('style');
+      s.id = 'gm-upgrade-style';
+      s.textContent = `
+        @keyframes gm-upgrade-in {
+          from { opacity:0; transform: scale(0.8) translateY(20px); }
+          to   { opacity:1; transform: scale(1) translateY(0); }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+
+    const emoji = document.createElement('div');
+    emoji.textContent = '🌟';
+    emoji.style.cssText = 'font-size:clamp(40px,8vw,64px);margin-bottom:10px;';
+
+    const title = document.createElement('div');
+    title.textContent = "You're on a roll!";
+    Object.assign(title.style, {
+      fontFamily: "'Fredoka One', cursive",
+      fontSize:   'clamp(22px,4vw,32px)',
+      color:      '#fff',
+      marginBottom: '10px',
+    });
+
+    const sub = document.createElement('div');
+    sub.id = 'gm-upgrade-sub';
+    Object.assign(sub.style, {
+      fontFamily: "'Nunito', sans-serif",
+      fontSize:   'clamp(14px,2.2vw,18px)',
+      color:      'rgba(255,255,255,0.75)',
+      marginBottom: '28px',
+      lineHeight: '1.5',
+    });
+
+    const ctaBtn = document.createElement('div');
+    ctaBtn.textContent = '🛒 Get Full Version';
+    Object.assign(ctaBtn.style, {
+      background:    'linear-gradient(135deg, #3ddc68, #1a8c3a)',
+      borderRadius:  '50px',
+      padding:       '14px 36px',
+      fontFamily:    "'Fredoka One', cursive",
+      fontSize:      'clamp(16px,2.8vw,22px)',
+      color:         '#fff',
+      cursor:        'pointer',
+      display:       'inline-block',
+      marginBottom:  '14px',
+      boxShadow:     '0 4px 20px rgba(61,220,104,0.4)',
+      transition:    'transform .15s',
+    });
+    ctaBtn.onmouseenter = () => { ctaBtn.style.transform = 'scale(1.05)'; };
+    ctaBtn.onmouseleave = () => { ctaBtn.style.transform = 'scale(1)'; };
+
+    const dismissBtn = document.createElement('div');
+    dismissBtn.textContent = 'Maybe later';
+    Object.assign(dismissBtn.style, {
+      color:      'rgba(255,255,255,0.4)',
+      fontSize:   'clamp(12px,1.8vw,14px)',
+      fontFamily: "'Nunito', sans-serif",
+      cursor:     'pointer',
+      transition: 'color .15s',
+    });
+    dismissBtn.onmouseenter = () => { dismissBtn.style.color = 'rgba(255,255,255,0.8)'; };
+    dismissBtn.onmouseleave = () => { dismissBtn.style.color = 'rgba(255,255,255,0.4)'; };
+    dismissBtn.onclick = (e) => { e.stopPropagation(); this._hideUpgradeModal(); };
+
+    box.append(emoji, title, sub, ctaBtn, dismissBtn);
+    this._upgradeModal.appendChild(box);
+    this._upgradeModal.addEventListener('click', (e) => {
+      if (e.target === this._upgradeModal) this._hideUpgradeModal();
+    });
+    this._root.appendChild(this._upgradeModal);
+  }
+
+  showUpgradeModal(type: 'animals' | 'plants'): void {
+    const sub = document.getElementById('gm-upgrade-sub')!;
+    if (type === 'animals') {
+      sub.innerHTML = `You've placed all <strong>${GameConfig.MAX_ANIMALS} free animals</strong>.<br>Unlock unlimited animals in the full game!`;
+    } else {
+      sub.innerHTML = `You've placed all <strong>${GameConfig.MAX_PLANTS} free crops</strong>.<br>Unlock unlimited crops in the full game!`;
+    }
+    (this._upgradeModal.style as any).display = 'flex';
+    (this._upgradeModal.querySelector('div')! as any).style.animation = 'none';
+    requestAnimationFrame(() => {
+      (this._upgradeModal.querySelector('div')! as any).style.animation = 'gm-upgrade-in .35s cubic-bezier(.34,1.56,.64,1)';
+    });
+  }
+
+  private _hideUpgradeModal(): void {
+    (this._upgradeModal.style as any).display = 'none';
+  }
+
+  // Called by PlayState after successful placement
+  /** Show the Skip Day button and register click callback */
+  private _skipDayHandler: ((e: Event) => void) | null = null;
+
+  showSkipDay(onClick: () => void): void {
+    // Remove previous listener if any
+    if (this._skipDayHandler) {
+      this._skipDayBtn.removeEventListener('click', this._skipDayHandler);
+    }
+    this._skipDayHandler = (e: Event) => { e.stopPropagation(); onClick(); };
+    this._skipDayBtn.addEventListener('click', this._skipDayHandler);
+    this._skipDayBtn.style.display = 'flex';
+  }
+
+  hideSkipDay(): void {
+    this._skipDayBtn.style.display = 'none';
+  }
+
+  incrementCount(zone: 'field' | 'fence'): void {
+    if (zone === 'fence') this._animalCount++;
+    else                  this._plantCount++;
+  }
+
+  get animalCount(): number { return this._animalCount; }
+  get plantCount():  number { return this._plantCount;  }
+
 }
