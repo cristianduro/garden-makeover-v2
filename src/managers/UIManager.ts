@@ -10,88 +10,65 @@ const FONT_BODY  = 'Nunito, sans-serif';
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
-/**
- * UIManager — 100 % PixiJS, zero DOM elements.
- *
- * Events emitted:
- *   'itemSelected'  (item: ItemData | null)
- *   'dayNight'
- *   'mute'
- *   'tutDone'
- */
 export class UIManager extends EventEmitter {
 
-  // ── Pixi ───────────────────────────────────────────────────────
-  private _pixi!:         PIXI.Application;
-  private _uiLayer!:      PIXI.Container;   // HUD + sidebar
-  private _fxLayer!:      PIXI.Container;   // sparkles
-  public  _overlayLayer!: PIXI.Container;   // loading / tutorial / modals
-  private _textures:      Map<string, PIXI.Texture> = new Map();
-  private _smokeTexture:  PIXI.Texture | null = null;
+  private pixiApp!:         PIXI.Application;
+  private uiLayer!:         PIXI.Container;
+  private fxLayer!:         PIXI.Container;
+  public  overlayLayer!:    PIXI.Container;
+  private textures:         Map<string, PIXI.Texture> = new Map();
+  private smokeTexture:     PIXI.Texture | null = null;
 
-  // ── Coin HUD ────────────────────────────────────────────────
-  private _coinHUD!:   PIXI.Container;
-  private _coinText!:  PIXI.Text;
-  private _coinHUDBg!: PIXI.Graphics;
+  private coinHUD!:    PIXI.Container;
+  private coinText!:   PIXI.Text;
+  private coinHUDBg!:  PIXI.Graphics;
 
-  // ── Watermark ───────────────────────────────────────────────
-  private _watermark!: PIXI.Sprite;
+  private watermark!:  PIXI.Sprite;
 
-  // ── Skip Day ─────────────────────────────────────────────────
-  private _skipDayBtn!:    PIXI.Container;
-  private _skipDayBg!:     PIXI.Graphics;
-  private _skipDayBorder!: PIXI.Graphics;   // separate layer for animated border
-  private _skipDayHandler: (() => void) | null = null;
-  private _skipDayT  = 0;
-  private _skipDaySz = 52;  // stored fixed size — avoids feedback loop in ticker
+  private skipDayBtn!:    PIXI.Container;
+  private skipDayBg!:     PIXI.Graphics;
+  private skipDayBorder!: PIXI.Graphics;
+  private skipDayHandler: (() => void) | null = null;
+  private skipDayTime  = 0;
+  private skipDaySize  = 52;
 
-  // ── Sidebar ───────────────────────────────────────────────────
-  private _sidebar!:        PIXI.Container;
-  private _catRows!:        PIXI.Container[];
-  private _catBtnConts:     Record<ItemCategory, PIXI.Container> = {} as any;
-  private _catBtnBgs:       Record<ItemCategory, PIXI.Graphics>  = {} as any;
-  private _catIconSprites:  Record<ItemCategory, PIXI.Sprite>    = {} as any;
-  private _catSubMenus:     Record<ItemCategory, PIXI.Container> = {} as any;
-  private _catDefaultImg:   Record<ItemCategory, string> = {
+  private sidebar!:       PIXI.Container;
+  private categoryRows!:  PIXI.Container[];
+  private categoryButtonContainers: Record<ItemCategory, PIXI.Container> = {} as any;
+  private categoryButtonBackgrounds: Record<ItemCategory, PIXI.Graphics>  = {} as any;
+  private categoryIconSprites:  Record<ItemCategory, PIXI.Sprite>    = {} as any;
+  private categorySubMenus:     Record<ItemCategory, PIXI.Container> = {} as any;
+  private categoryDefaultImages: Record<ItemCategory, string> = {
     crops:   GameConfig.ASSETS.IMAGES.corn,
     animals: GameConfig.ASSETS.IMAGES.cow,
   };
-  private _itemBtnBgs:   Map<string, PIXI.Graphics>  = new Map();
-  private _openCat:      ItemCategory | null = null;
+  private itemButtonBackgrounds: Map<string, PIXI.Graphics>  = new Map();
+  private openCategory:  ItemCategory | null = null;
 
-  // ── Placement prompt ─────────────────────────────────────────
-  private _prompt!:     PIXI.Container;
-  private _promptText!: PIXI.Text;
+  private prompt!:     PIXI.Container;
+  private promptText!: PIXI.Text;
 
-  // ── Toasts ────────────────────────────────────────────────────
-  private _toastLayer!: PIXI.Container;
+  private toastLayer!: PIXI.Container;
 
-  // ── Upgrade modal ─────────────────────────────────────────────
-  private _upgradeModal!:    PIXI.Container;
-  private _upgradeSubText!:  PIXI.Text;
+  private upgradeModal!:    PIXI.Container;
+  private upgradeSubText!:  PIXI.Text;
 
-  // ── State ──────────────────────────────────────────────────────
-  private _coins: number = GameConfig.START_COINS;
-  private _selItem:       ItemData | null = null;
-  private _animalCount  = 0;
-  private _plantCount   = 0;
+  private coinBalance: number = GameConfig.START_COINS;
+  private currentSelection:   ItemData | null = null;
+  private placedAnimalCount  = 0;
+  private placedPlantCount   = 0;
 
-  // ── Public API ──────────────────────────────────────────────────
-  get canvas():       HTMLCanvasElement { return this._pixi.view as HTMLCanvasElement; }
-  get app():          PIXI.Application  { return this._pixi; }
-  get overlayLayer(): PIXI.Container    { return this._overlayLayer; }
-  get selectedItem(): ItemData | null   { return this._selItem; }
-  get coins():        number            { return this._coins; }
-  get animalCount():  number            { return this._animalCount; }
-  get plantCount():   number            { return this._plantCount; }
+  get canvas():        HTMLCanvasElement { return this.pixiApp.view as HTMLCanvasElement; }
+  get app():           PIXI.Application  { return this.pixiApp; }
+  get selectedItem():  ItemData | null   { return this.currentSelection; }
+  get coins():         number            { return this.coinBalance; }
+  get animalCount():   number            { return this.placedAnimalCount; }
+  get plantCount():    number            { return this.placedPlantCount; }
 
-  // ════════════════════════════════════════════════════════════════
-  //  INIT
-  // ════════════════════════════════════════════════════════════════
   async init(container: HTMLElement): Promise<void> {
-    this._loadFonts();
+    this.loadFonts();
 
-    this._pixi = new PIXI.Application({
+    this.pixiApp = new PIXI.Application({
       width:           innerWidth,
       height:          innerHeight,
       backgroundAlpha: 0,
@@ -99,33 +76,33 @@ export class UIManager extends EventEmitter {
       resolution:      Math.min(devicePixelRatio, 2),
     });
 
-    const cv = this._pixi.view as HTMLCanvasElement;
+    const cv = this.pixiApp.view as HTMLCanvasElement;
     cv.style.cssText = 'position:absolute;inset:0;z-index:45;pointer-events:auto;';
     container.appendChild(cv);
 
-    this._uiLayer      = new PIXI.Container();
-    this._fxLayer      = new PIXI.Container();
-    this._overlayLayer = new PIXI.Container();
-    this._pixi.stage.addChild(this._uiLayer);
-    this._pixi.stage.addChild(this._fxLayer);
-    this._pixi.stage.addChild(this._overlayLayer);
+    this.uiLayer      = new PIXI.Container();
+    this.fxLayer      = new PIXI.Container();
+    this.overlayLayer = new PIXI.Container();
+    this.pixiApp.stage.addChild(this.uiLayer);
+    this.pixiApp.stage.addChild(this.fxLayer);
+    this.pixiApp.stage.addChild(this.overlayLayer);
 
-    await this._loadTextures();
-    this._smokeTexture = this._textures.get('smoke') ?? null;
+    await this.loadTextures();
+    this.smokeTexture = this.textures.get('smoke') ?? null;
 
-    this._buildCoinHUD();
-    this._buildWatermark();
-    this._buildSkipDay();
-    this._buildSidebar();
-    this._buildPrompt();
-    this._buildToastLayer();
-    this._buildUpgradeModal();
+    this.buildCoinHUD();
+    this.buildWatermark();
+    this.buildSkipDay();
+    this.buildSidebar();
+    this.buildPrompt();
+    this.buildToastLayer();
+    this.buildUpgradeModal();
 
-    window.addEventListener('resize', () => this._onResize());
-    this._onResize();
+    window.addEventListener('resize', () => this.onResize());
+    this.onResize();
   }
 
-  private _loadFonts(): void {
+  private loadFonts(): void {
     if (document.getElementById('gm-fonts')) return;
     const link = document.createElement('link');
     link.id   = 'gm-fonts';
@@ -134,7 +111,7 @@ export class UIManager extends EventEmitter {
     document.head.appendChild(link);
   }
 
-  private async _loadTextures(): Promise<void> {
+  private async loadTextures(): Promise<void> {
     const sources: Record<string, string> = {
       ...(GameConfig.ASSETS.IMAGES as Record<string, string>),
       smoke:   '/assets/images/smoke.png',
@@ -144,7 +121,7 @@ export class UIManager extends EventEmitter {
     await Promise.all(Object.entries(sources).map(([k, url]) =>
       new Promise<void>(resolve => {
         const tex = PIXI.Texture.from(url);
-        this._textures.set(k, tex);
+        this.textures.set(k, tex);
         if (tex.baseTexture.valid) { resolve(); return; }
         tex.baseTexture.once('loaded', () => resolve());
         tex.baseTexture.once('error',  () => resolve());
@@ -152,166 +129,149 @@ export class UIManager extends EventEmitter {
     ));
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  COIN HUD  (top-right)
-  // ════════════════════════════════════════════════════════════════
-  private _buildCoinHUD(): void {
-    this._coinHUD   = new PIXI.Container();
-    this._coinHUDBg = new PIXI.Graphics();
-    this._coinHUD.addChild(this._coinHUDBg);
+  private buildCoinHUD(): void {
+    this.coinHUD   = new PIXI.Container();
+    this.coinHUDBg = new PIXI.Graphics();
+    this.coinHUD.addChild(this.coinHUDBg);
 
-    const gem = new PIXI.Sprite(this._textures.get('money') ?? PIXI.Texture.WHITE);
+    const gem = new PIXI.Sprite(this.textures.get('money') ?? PIXI.Texture.WHITE);
     gem.anchor.set(0, 0.5);
     gem.name = 'gem';
-    this._coinHUD.addChild(gem);
+    this.coinHUD.addChild(gem);
 
-    this._coinText = new PIXI.Text(`${this._coins}`, {
+    this.coinText = new PIXI.Text(`${this.coinBalance}`, {
       fontFamily: FONT_TITLE, fontSize: 28, fill: 0xffffff,
       dropShadow: true, dropShadowDistance: 2, dropShadowAlpha: 0.5,
     });
-    this._coinText.anchor.set(0, 0.5);
-    this._coinHUD.addChild(this._coinText);
+    this.coinText.anchor.set(0, 0.5);
+    this.coinHUD.addChild(this.coinText);
 
-    this._uiLayer.addChild(this._coinHUD);
-    this._layoutCoinHUD();
+    this.uiLayer.addChild(this.coinHUD);
+    this.layoutCoinHUD();
   }
 
-  private _layoutCoinHUD(): void {
+  private layoutCoinHUD(): void {
     const portrait  = innerWidth < innerHeight;
     const gemSz     = portrait ? 26 : 32;
     const fontSize  = portrait ? 22 : 28;
     const padV = 8, padH = 16, gap = 8;
 
-    const gem = this._coinHUD.getChildByName('gem') as PIXI.Sprite;
+    const gem = this.coinHUD.getChildByName('gem') as PIXI.Sprite;
     gem.width  = gemSz;
     gem.height = gemSz;
     gem.x = padH / 2;
     gem.y = 0;
 
-    this._coinText.style.fontSize = fontSize;
-    this._coinText.x = gem.x + gemSz + gap;
-    this._coinText.y = 0;
+    this.coinText.style.fontSize = fontSize;
+    this.coinText.x = gem.x + gemSz + gap;
+    this.coinText.y = 0;
 
-    const totalW = gem.x + gemSz + gap + this._coinText.width + padH / 2 + padH;
+    const totalW = gem.x + gemSz + gap + this.coinText.width + padH / 2 + padH;
     const totalH = gemSz + padV * 2;
 
-    this._coinHUDBg.clear();
-    this._coinHUDBg.lineStyle(1, 0xffffff, 0.15);
-    this._coinHUDBg.beginFill(0x000000, 0.78);
-    this._coinHUDBg.drawRoundedRect(0, -totalH / 2, totalW, totalH, 14);
-    this._coinHUDBg.endFill();
+    this.coinHUDBg.clear();
+    this.coinHUDBg.lineStyle(1, 0xffffff, 0.15);
+    this.coinHUDBg.beginFill(0x000000, 0.78);
+    this.coinHUDBg.drawRoundedRect(0, -totalH / 2, totalW, totalH, 14);
+    this.coinHUDBg.endFill();
 
     const margin = Math.max(10, innerWidth * 0.02);
     const topMargin = Math.max(10, innerHeight * 0.02);
-    this._coinHUD.x = innerWidth  - totalW - margin;
-    this._coinHUD.y = topMargin + totalH / 2;
+    this.coinHUD.x = innerWidth  - totalW - margin;
+    this.coinHUD.y = topMargin + totalH / 2;
   }
 
-  private _updateCoinText(): void {
-    this._coinText.text = `${this._coins}`;
-    this._layoutCoinHUD();
+  private updateCoinText(): void {
+    this.coinText.text = `${this.coinBalance}`;
+    this.layoutCoinHUD();
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  WATERMARK  (top-left)
-  // ════════════════════════════════════════════════════════════════
-  private _buildWatermark(): void {
-    this._watermark = new PIXI.Sprite(this._textures.get('icon') ?? PIXI.Texture.WHITE);
-    this._watermark.anchor.set(0, 0);
-    this._watermark.alpha = 0.55;
-    this._uiLayer.addChild(this._watermark);
+  private buildWatermark(): void {
+    this.watermark = new PIXI.Sprite(this.textures.get('icon') ?? PIXI.Texture.WHITE);
+    this.watermark.anchor.set(0, 0);
+    this.watermark.alpha = 0.55;
+    this.uiLayer.addChild(this.watermark);
   }
 
-  private _layoutWatermark(): void {
+  private layoutWatermark(): void {
     const sz = Math.max(36, Math.min(innerWidth * 0.06, 60));
     const margin = Math.max(8, innerWidth * 0.015);
-    this._watermark.width  = sz;
-    this._watermark.height = sz;
-    this._watermark.x = margin;
-    this._watermark.y = Math.max(8, innerHeight * 0.015);
+    this.watermark.width  = sz;
+    this.watermark.height = sz;
+    this.watermark.x = margin;
+    this.watermark.y = Math.max(8, innerHeight * 0.015);
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  SKIP DAY  (top-right, below coin)
-  // ════════════════════════════════════════════════════════════════
-  private _buildSkipDay(): void {
-    this._skipDayBtn = new PIXI.Container();
-    this._skipDayBtn.visible = false;
+  private buildSkipDay(): void {
+    this.skipDayBtn = new PIXI.Container();
+    this.skipDayBtn.visible = false;
 
-    // Filled background — drawn once in layout, never in the ticker
-    this._skipDayBg = new PIXI.Graphics();
-    this._skipDayBtn.addChild(this._skipDayBg);
+    this.skipDayBg = new PIXI.Graphics();
+    this.skipDayBtn.addChild(this.skipDayBg);
 
-    const img = new PIXI.Sprite(this._textures.get('skipDay') ?? PIXI.Texture.WHITE);
+    const img = new PIXI.Sprite(this.textures.get('skipDay') ?? PIXI.Texture.WHITE);
     img.anchor.set(0.5);
     img.name = 'img';
-    this._skipDayBtn.addChild(img);
+    this.skipDayBtn.addChild(img);
 
-    // Animated border — separate Graphics on top, only border is redrawn each frame
-    this._skipDayBorder = new PIXI.Graphics();
-    this._skipDayBtn.addChild(this._skipDayBorder);
+    // Animated border drawn separately to avoid feedback loop when reading container.width
+    this.skipDayBorder = new PIXI.Graphics();
+    this.skipDayBtn.addChild(this.skipDayBorder);
 
-    this._skipDayBtn.eventMode = 'static';
-    this._skipDayBtn.cursor    = 'pointer';
+    this.skipDayBtn.eventMode = 'static';
+    this.skipDayBtn.cursor    = 'pointer';
 
-    this._skipDayBtn.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
+    this.skipDayBtn.on('pointerdown', (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._skipDayBtn.scale.set(0.93);
+      this.skipDayBtn.scale.set(0.93);
     });
-    this._skipDayBtn.on('pointerup', (e: PIXI.FederatedPointerEvent) => {
+    this.skipDayBtn.on('pointerup', (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._skipDayBtn.scale.set(1);
-      if (this._skipDayHandler) this._skipDayHandler();
+      this.skipDayBtn.scale.set(1);
+      if (this.skipDayHandler) this.skipDayHandler();
     });
-    this._skipDayBtn.on('pointerover', () => this._skipDayBtn.scale.set(1.1));
-    this._skipDayBtn.on('pointerout',  () => this._skipDayBtn.scale.set(1));
+    this.skipDayBtn.on('pointerover', () => this.skipDayBtn.scale.set(1.1));
+    this.skipDayBtn.on('pointerout',  () => this.skipDayBtn.scale.set(1));
 
-    // Pulse: only redraw the border Graphics using the stored fixed size
-    this._pixi.ticker.add((dt: number) => {
-      if (!this._skipDayBtn.visible) return;
-      this._skipDayT += dt / 60;
-      const a   = 0.35 + 0.55 * (Math.sin(this._skipDayT * Math.PI / 0.9) * 0.5 + 0.5);
-      const sz  = this._skipDaySz;  // fixed — never read container.width
-      this._skipDayBorder.clear();
-      this._skipDayBorder.lineStyle(2.5, 0xffc832, a);
-      this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
+    this.pixiApp.ticker.add((dt: number) => {
+      if (!this.skipDayBtn.visible) return;
+      this.skipDayTime += dt / 60;
+      const alpha = 0.35 + 0.55 * (Math.sin(this.skipDayTime * Math.PI / 0.9) * 0.5 + 0.5);
+      const sz    = this.skipDaySize;
+      this.skipDayBorder.clear();
+      this.skipDayBorder.lineStyle(2.5, 0xffc832, alpha);
+      this.skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
     });
 
-    this._uiLayer.addChild(this._skipDayBtn);
+    this.uiLayer.addChild(this.skipDayBtn);
   }
 
-  private _layoutSkipDay(): void {
+  private layoutSkipDay(): void {
     const sz     = Math.max(42, Math.min(innerWidth * 0.08, 56));
     const margin = Math.max(10, innerWidth * 0.02);
-    this._skipDaySz = sz;   // store for ticker
+    this.skipDaySize = sz;
 
-    // Static filled bg — no border here, border is handled by _skipDayBorder
-    this._skipDayBg.clear();
-    this._skipDayBg.beginFill(0x000000, 0.72);
-    this._skipDayBg.drawRoundedRect(0, 0, sz, sz, 14);
-    this._skipDayBg.endFill();
+    this.skipDayBg.clear();
+    this.skipDayBg.beginFill(0x000000, 0.72);
+    this.skipDayBg.drawRoundedRect(0, 0, sz, sz, 14);
+    this.skipDayBg.endFill();
 
-    // Redraw border at correct size
-    this._skipDayBorder.clear();
-    this._skipDayBorder.lineStyle(2.5, 0xffc832, 0.5);
-    this._skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
+    this.skipDayBorder.clear();
+    this.skipDayBorder.lineStyle(2.5, 0xffc832, 0.5);
+    this.skipDayBorder.drawRoundedRect(0, 0, sz, sz, 14);
 
-    const img = this._skipDayBtn.getChildByName('img') as PIXI.Sprite;
+    const img = this.skipDayBtn.getChildByName('img') as PIXI.Sprite;
     if (img) { img.width = sz - 14; img.height = sz - 14; img.x = sz / 2; img.y = sz / 2; }
 
-    // Position: top-right below coin HUD
-    const coinBottom = this._coinHUD.y + this._coinHUDBg.height / 2 + 8;
-    this._skipDayBtn.x = innerWidth - sz - margin;
-    this._skipDayBtn.y = coinBottom;
+    const coinBottom = this.coinHUD.y + this.coinHUDBg.height / 2 + 8;
+    this.skipDayBtn.x = innerWidth - sz - margin;
+    this.skipDayBtn.y = coinBottom;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  SIDEBAR
-  // ════════════════════════════════════════════════════════════════
-  private _buildSidebar(): void {
-    this._sidebar  = new PIXI.Container();
-    this._sidebar.alpha = 0;  // hidden until tutorial done
-    this._catRows  = [];
+  private buildSidebar(): void {
+    this.sidebar      = new PIXI.Container();
+    this.sidebar.alpha = 0;
+    this.categoryRows = [];
 
     const defs: Array<{ cat: ItemCategory; imgKey: ImgKey; label: string }> = [
       { cat: 'crops',   imgKey: 'corn', label: 'Crop'   },
@@ -319,35 +279,33 @@ export class UIManager extends EventEmitter {
     ];
 
     defs.forEach(({ cat, imgKey, label }) => {
-      const row = this._makeCatRow(cat, imgKey, label);
-      this._catRows.push(row);
-      this._sidebar.addChild(row);
+      const row = this.makeCatRow(cat, imgKey, label);
+      this.categoryRows.push(row);
+      this.sidebar.addChild(row);
     });
 
-    this._uiLayer.addChild(this._sidebar);
+    this.uiLayer.addChild(this.sidebar);
   }
 
-  private _makeCatRow(cat: ItemCategory, imgKey: ImgKey, label: string): PIXI.Container {
+  private makeCatRow(cat: ItemCategory, imgKey: ImgKey, label: string): PIXI.Container {
     const row = new PIXI.Container();
     const SZ  = 64;
     const RAD = 14;
 
-    // ── Category button ────────────────────────────────────────
     const btnCont = new PIXI.Container();
     const btnBg   = new PIXI.Graphics();
-    this._drawCatBg(btnBg, SZ, false);
+    this.drawCatBg(btnBg, SZ, false);
     btnCont.addChild(btnBg);
 
-    const catImg = new PIXI.Sprite(this._textures.get(imgKey) ?? PIXI.Texture.WHITE);
+    const catImg = new PIXI.Sprite(this.textures.get(imgKey) ?? PIXI.Texture.WHITE);
     catImg.anchor.set(0.5);
     catImg.width  = SZ * 0.72;
     catImg.height = SZ * 0.72;
     catImg.x = SZ / 2;
     catImg.y = SZ / 2;
     btnCont.addChild(catImg);
-    this._catIconSprites[cat] = catImg;
+    this.categoryIconSprites[cat] = catImg;
 
-    // + badge
     const badge = new PIXI.Graphics();
     badge.beginFill(0x3ddc68); badge.drawCircle(0, 0, 9); badge.endFill();
     badge.x = SZ - 5; badge.y = SZ - 5;
@@ -368,20 +326,19 @@ export class UIManager extends EventEmitter {
 
     btnCont.on('pointerdown', (e) => { stopNative(e); btnCont.scale.set(0.95); });
     btnCont.on('pointerup',   (e) => { stopNative(e); btnCont.scale.set(1); });
-    btnCont.on('pointerover', () => { if (this._openCat !== cat) btnCont.scale.set(1.07); });
-    btnCont.on('pointerout',  () => { if (this._openCat !== cat) btnCont.scale.set(1); });
+    btnCont.on('pointerover', () => { if (this.openCategory !== cat) btnCont.scale.set(1.07); });
+    btnCont.on('pointerout',  () => { if (this.openCategory !== cat) btnCont.scale.set(1); });
     btnCont.on('pointertap',  (e) => {
       stopNative(e);
-      this._toggleMenu(cat);
+      this.toggleMenu(cat);
     });
 
-    this._catBtnConts[cat] = btnCont;
-    this._catBtnBgs[cat]   = btnBg;
+    this.categoryButtonContainers[cat] = btnCont;
+    this.categoryButtonBackgrounds[cat] = btnBg;
     row.addChild(btnCont);
 
-    // ── Label ──────────────────────────────────────────────────
     const lblW   = 80;
-    const lblGap = 6;   // gap between icon button and label
+    const lblGap = 6;
     const lblBg  = new PIXI.Graphics();
     lblBg.lineStyle(1, 0xffffff, 0.15);
     lblBg.beginFill(0x000000, 0.78);
@@ -399,16 +356,15 @@ export class UIManager extends EventEmitter {
     lblCont.name = 'label';
     row.addChild(lblCont);
 
-    // ── Sub-menu ───────────────────────────────────────────────
-    const sub = this._makeSubMenu(cat, SZ);
+    const sub = this.makeSubMenu(cat, SZ);
     sub.visible = false;
-    this._catSubMenus[cat] = sub;
+    this.categorySubMenus[cat] = sub;
     row.addChild(sub);
 
     return row;
   }
 
-  private _makeSubMenu(cat: ItemCategory, btnSz: number): PIXI.Container {
+  private makeSubMenu(cat: ItemCategory, btnSz: number): PIXI.Container {
     const sub    = new PIXI.Container();
     const items  = ItemCatalog[cat];
     const itemH  = 56;
@@ -417,13 +373,12 @@ export class UIManager extends EventEmitter {
     let yOff = 0;
 
     items.forEach(item => {
-      const btn = this._makeItemBtn(item, itemW, itemH);
+      const btn = this.makeItemBtn(item, itemW, itemH);
       btn.y = yOff;
       sub.addChild(btn);
       yOff += itemH + gap;
     });
 
-    // Back button
     const backH  = 44;
     const backBg = new PIXI.Graphics();
     backBg.lineStyle(1, 0xffffff, 0.15);
@@ -446,7 +401,7 @@ export class UIManager extends EventEmitter {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation());
     backCont.on('pointertap',  (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._closeMenu();
+      this.closeMenu();
     });
     backCont.on('pointerover', () => { backBg.tint = 0xcccccc; });
     backCont.on('pointerout',  () => { backBg.tint = 0xffffff; });
@@ -455,16 +410,16 @@ export class UIManager extends EventEmitter {
     return sub;
   }
 
-  private _makeItemBtn(item: ItemData, w: number, h: number): PIXI.Container {
+  private makeItemBtn(item: ItemData, w: number, h: number): PIXI.Container {
     const cont = new PIXI.Container();
     const bg   = new PIXI.Graphics();
-    this._drawItemBtnBg(bg, w, h, false, false);
+    this.drawItemBtnBg(bg, w, h, false, false);
     cont.addChild(bg);
-    this._itemBtnBgs.set(item.id, bg);
+    this.itemButtonBackgrounds.set(item.id, bg);
 
     const iconSz  = 40;
     const imgKey  = item.imageKey as ImgKey;
-    const iconTex = this._textures.get(imgKey) ?? PIXI.Texture.WHITE;
+    const iconTex = this.textures.get(imgKey) ?? PIXI.Texture.WHITE;
     const icon    = new PIXI.Sprite(iconTex);
     icon.anchor.set(0.5);
     icon.width  = iconSz;
@@ -481,9 +436,8 @@ export class UIManager extends EventEmitter {
     nameTxt.y = h / 2 - 1;
     cont.addChild(nameTxt);
 
-    // Cost row: gem icon + amount
     const gemSz  = 16;
-    const gemTex = this._textures.get('money') ?? PIXI.Texture.WHITE;
+    const gemTex = this.textures.get('money') ?? PIXI.Texture.WHITE;
     const gemSpr = new PIXI.Sprite(gemTex);
     gemSpr.anchor.set(0, 0.5);
     gemSpr.width  = gemSz;
@@ -500,7 +454,6 @@ export class UIManager extends EventEmitter {
     costTxt.y = h / 2 + 10;
     cont.addChild(costTxt);
 
-    // Interactivity
     cont.eventMode = 'static';
     cont.cursor    = 'pointer';
     cont.hitArea   = new PIXI.Rectangle(0, 0, w, h);
@@ -511,195 +464,179 @@ export class UIManager extends EventEmitter {
     cont.on('pointerdown', (e) => { stopNative(e); cont.scale.set(0.97); });
     cont.on('pointerup',   (e) => { stopNative(e); cont.scale.set(1); });
     cont.on('pointerover', () => {
-      if (this._selItem?.id !== item.id && this._coins >= item.cost) {
+      if (this.currentSelection?.id !== item.id && this.coinBalance >= item.cost) {
         cont.x = 5;
       }
     });
     cont.on('pointerout', () => {
-      if (this._selItem?.id !== item.id) cont.x = 0;
+      if (this.currentSelection?.id !== item.id) cont.x = 0;
     });
     cont.on('pointertap', (e) => {
       stopNative(e);
-      this._selectItem(item);
+      this.selectItem(item);
     });
 
     return cont;
   }
 
-  private _drawCatBg(g: PIXI.Graphics, sz: number, active: boolean): void {
-    g.clear();
+  private drawCatBg(graphics: PIXI.Graphics, sz: number, active: boolean): void {
+    graphics.clear();
     const borderColor = active ? 0x3ddc68 : 0xffffff;
     const borderAlpha = active ? 1.0 : 0.2;
-    g.lineStyle(2, borderColor, borderAlpha);
-    g.beginFill(0x000000, 0.78);
-    g.drawRoundedRect(0, 0, sz, sz, 14);
-    g.endFill();
+    graphics.lineStyle(2, borderColor, borderAlpha);
+    graphics.beginFill(0x000000, 0.78);
+    graphics.drawRoundedRect(0, 0, sz, sz, 14);
+    graphics.endFill();
   }
 
-  private _drawItemBtnBg(g: PIXI.Graphics, w: number, h: number,
-                          selected: boolean, noCoins: boolean): void {
-    g.clear();
+  private drawItemBtnBg(graphics: PIXI.Graphics, w: number, h: number,
+                         selected: boolean, noCoins: boolean): void {
+    graphics.clear();
     const borderColor = selected ? 0x3ddc68 : 0xffffff;
     const borderAlpha = selected ? 1.0 : 0.18;
     const fillColor   = selected ? 0x3ddc68 : 0x000000;
     const fillAlpha   = selected ? 0.18    : 0.78;
-    g.lineStyle(1, borderColor, borderAlpha);
-    g.beginFill(fillColor, fillAlpha);
-    g.drawRoundedRect(0, 0, w, h, 14);
-    g.endFill();
-    if (noCoins) { g.alpha = 0.45; } else { g.alpha = 1; }
+    graphics.lineStyle(1, borderColor, borderAlpha);
+    graphics.beginFill(fillColor, fillAlpha);
+    graphics.drawRoundedRect(0, 0, w, h, 14);
+    graphics.endFill();
+    if (noCoins) { graphics.alpha = 0.45; } else { graphics.alpha = 1; }
   }
 
-  // ── Menu open / close ──────────────────────────────────────────
-  private _toggleMenu(cat: ItemCategory): void {
-    if (this._openCat === cat) { this._closeMenu(); return; }
-    this._closeMenu();
-    this._openCat = cat;
+  private toggleMenu(cat: ItemCategory): void {
+    if (this.openCategory === cat) { this.closeMenu(); return; }
+    this.closeMenu();
+    this.openCategory = cat;
 
-    const sub  = this._catSubMenus[cat];
-    const btnB = this._catBtnBgs[cat];
-    this._drawCatBg(btnB, 64, true);
+    const sub  = this.categorySubMenus[cat];
+    const btnBg = this.categoryButtonBackgrounds[cat];
+    this.drawCatBg(btnBg, 64, true);
     sub.visible = true;
-    this._positionSubMenu(cat);
-    this._refreshSubMenu(cat);
+    this.positionSubMenu(cat);
+    this.refreshSubMenu(cat);
   }
 
-  private _closeMenu(): void {
-    if (!this._openCat) return;
-    const cat  = this._openCat;
-    this._openCat = null;
-    this._catSubMenus[cat].visible = false;
-    this._drawCatBg(this._catBtnBgs[cat], 64, false);
-    this._catBtnConts[cat].scale.set(1);
+  private closeMenu(): void {
+    if (!this.openCategory) return;
+    const cat  = this.openCategory;
+    this.openCategory = null;
+    this.categorySubMenus[cat].visible = false;
+    this.drawCatBg(this.categoryButtonBackgrounds[cat], 64, false);
+    this.categoryButtonContainers[cat].scale.set(1);
   }
 
   /** Position the open submenu based on current orientation. */
-  private _positionSubMenu(cat: ItemCategory): void {
+  private positionSubMenu(cat: ItemCategory): void {
     const portrait = innerWidth < innerHeight;
-    const sub  = this._catSubMenus[cat];
-    const row  = this._catRows[cat === 'crops' ? 0 : 1];
+    const sub  = this.categorySubMenus[cat];
+    const row  = this.categoryRows[cat === 'crops' ? 0 : 1];
     const lbl  = row.getChildByName('label') as PIXI.Container | null;
 
     if (portrait) {
-      // Opens upward: position above the sidebar (which is at bottom)
       const totalSubH = sub.height;
       sub.x = 0;
       sub.y = -(totalSubH + 8);
     } else {
-      // Landscape: opens to the right
       const lblW = lbl ? (lbl.width + 4) : 88;
       sub.x = 64 + lblW;
       sub.y = -sub.height / 2 + 32;
     }
   }
 
-  private _refreshSubMenu(cat: ItemCategory): void {
-    const sub = this._catSubMenus[cat];
+  private refreshSubMenu(cat: ItemCategory): void {
+    const sub = this.categorySubMenus[cat];
     ItemCatalog[cat].forEach(item => {
-      const bg = this._itemBtnBgs.get(item.id);
+      const bg = this.itemButtonBackgrounds.get(item.id);
       if (!bg) return;
-      const selected = this._selItem?.id === item.id;
-      const noCoins  = this._coins < item.cost;
-      this._drawItemBtnBg(bg, 210, 56, selected, noCoins);
+      const selected = this.currentSelection?.id === item.id;
+      const noCoins  = this.coinBalance < item.cost;
+      this.drawItemBtnBg(bg, 210, 56, selected, noCoins);
       const parent = bg.parent as PIXI.Container;
       parent.alpha = noCoins ? 0.5 : 1;
     });
-    // Force position refresh
-    this._positionSubMenu(cat);
+    this.positionSubMenu(cat);
     void sub;
   }
 
-  private _selectItem(item: ItemData): void {
-    if (this._coins < item.cost) {
+  private selectItem(item: ItemData): void {
+    if (this.coinBalance < item.cost) {
       this.showToast(`❌ Need ${item.cost} coins!`);
-      this._shakeCoinHUD();
+      this.shakeCoinHUD();
       return;
     }
 
-    this._selItem = item;
+    this.currentSelection = item;
 
-    // Update all item button visuals
     const allCats: ItemCategory[] = ['crops', 'animals'];
-    allCats.forEach(c => {
-      ItemCatalog[c].forEach(i => {
-        const bg = this._itemBtnBgs.get(i.id);
-        if (bg) this._drawItemBtnBg(bg, 210, 56, i.id === item.id, this._coins < i.cost);
+    allCats.forEach(cat => {
+      ItemCatalog[cat].forEach(i => {
+        const bg = this.itemButtonBackgrounds.get(i.id);
+        if (bg) this.drawItemBtnBg(bg, 210, 56, i.id === item.id, this.coinBalance < i.cost);
       });
     });
 
-    // Update cat icon to selected item
     const iconKey = item.imageKey as ImgKey;
     const cat     = item.zone === 'fence' ? 'animals' : 'crops';
-    const newTex  = this._textures.get(iconKey) ?? PIXI.Texture.WHITE;
-    this._catIconSprites[cat].texture = newTex;
+    const newTex  = this.textures.get(iconKey) ?? PIXI.Texture.WHITE;
+    this.categoryIconSprites[cat].texture = newTex;
 
-    this._closeMenu();
-    this._showPrompt(item);
+    this.closeMenu();
+    this.showPrompt(item);
     this.emit('itemSelected', item);
   }
 
-  // ── Layout ─────────────────────────────────────────────────────
-  private _layoutSidebar(): void {
+  private layoutSidebar(): void {
     const portrait = innerWidth < innerHeight;
     const SZ       = portrait ? 52 : 64;
     const gap      = portrait ? 8  : 10;
     const margin   = portrait ? 6  : 8;
 
-    // Resize cat buttons
     (['crops', 'animals'] as ItemCategory[]).forEach(cat => {
-      const bg = this._catBtnBgs[cat];
-      this._drawCatBg(bg, SZ, this._openCat === cat);
-      const icon = this._catIconSprites[cat];
+      const bg = this.categoryButtonBackgrounds[cat];
+      this.drawCatBg(bg, SZ, this.openCategory === cat);
+      const icon = this.categoryIconSprites[cat];
       icon.width  = SZ * 0.72;
       icon.height = SZ * 0.72;
       icon.x = SZ / 2; icon.y = SZ / 2;
-      this._catBtnConts[cat].hitArea = new PIXI.Rectangle(0, 0, SZ, SZ);
+      this.categoryButtonContainers[cat].hitArea = new PIXI.Rectangle(0, 0, SZ, SZ);
     });
 
     if (portrait) {
-      // Bottom-left horizontal layout
-      this._sidebar.x = margin;
-      this._sidebar.y = innerHeight - SZ - margin;
+      this.sidebar.x = margin;
+      this.sidebar.y = innerHeight - SZ - margin;
 
-      this._catRows.forEach((row, i) => {
-        row.x = i * (SZ + gap);
+      this.categoryRows.forEach((row, index) => {
+        row.x = index * (SZ + gap);
         row.y = 0;
         const lbl = row.getChildByName('label') as PIXI.Container | null;
         if (lbl) lbl.visible = false;
       });
     } else {
-      // Left side, vertically centered
-      const totalH = this._catRows.length * SZ + (this._catRows.length - 1) * gap;
-      this._sidebar.x = margin;
-      this._sidebar.y = (innerHeight - totalH) / 2;
+      const totalH = this.categoryRows.length * SZ + (this.categoryRows.length - 1) * gap;
+      this.sidebar.x = margin;
+      this.sidebar.y = (innerHeight - totalH) / 2;
 
-      this._catRows.forEach((row, i) => {
+      this.categoryRows.forEach((row, index) => {
         row.x = 0;
-        row.y = i * (SZ + gap);
+        row.y = index * (SZ + gap);
         const lbl = row.getChildByName('label') as PIXI.Container | null;
         if (lbl) lbl.visible = true;
       });
     }
 
-    // Reposition any open submenu
-    if (this._openCat) this._positionSubMenu(this._openCat);
+    if (this.openCategory) this.positionSubMenu(this.openCategory);
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  PLACEMENT PROMPT  (top-center)
-  // ════════════════════════════════════════════════════════════════
-  private _buildPrompt(): void {
-    this._prompt = new PIXI.Container();
-    this._prompt.visible = false;
-
-    // built lazily on first show; store background reference
-    this._uiLayer.addChild(this._prompt);
+  private buildPrompt(): void {
+    this.prompt = new PIXI.Container();
+    this.prompt.visible = false;
+    this.uiLayer.addChild(this.prompt);
   }
 
-  private _showPrompt(item: ItemData): void {
-    this._prompt.removeChildren();
+  private showPrompt(item: ItemData): void {
+    this.prompt.removeChildren();
 
-    const emoji = this._itemEmoji(item.id);
+    const emoji = this.itemEmoji(item.id);
     const zone  = item.zone === 'fence' ? 'in the pen' : 'in the field';
     const msg   = `${emoji} Place ${item.name} ${zone}`;
 
@@ -709,7 +646,7 @@ export class UIManager extends EventEmitter {
       fontFamily: FONT_TITLE, fontSize: 17, fill: 0xffffff,
     });
     text.anchor.set(0, 0.5);
-    this._promptText = text;
+    this.promptText = text;
 
     const cancelSz = 26;
     const totalW = padH + text.width + gap + cancelSz + padH;
@@ -724,7 +661,6 @@ export class UIManager extends EventEmitter {
     text.x = padH;
     text.y = totalH / 2;
 
-    // Cancel button
     const cancelBg = new PIXI.Graphics();
     cancelBg.lineStyle(1, 0xff8888, 0.4);
     cancelBg.beginFill(0xff3c3c, 0.25);
@@ -752,24 +688,21 @@ export class UIManager extends EventEmitter {
     cancelCont.on('pointerover', () => { cancelBg.tint = 0xee6666; });
     cancelCont.on('pointerout',  () => { cancelBg.tint = 0xffffff; });
 
-    this._prompt.addChild(bg, text, cancelCont);
-    this._prompt.visible = true;
-    this._layoutPrompt();
+    this.prompt.addChild(bg, text, cancelCont);
+    this.prompt.visible = true;
+    this.layoutPrompt();
   }
 
-  private _layoutPrompt(): void {
-    if (!this._prompt.visible) return;
+  private layoutPrompt(): void {
+    if (!this.prompt.visible) return;
     const margin = Math.max(14, innerHeight * 0.025);
-    this._prompt.x = (innerWidth - this._prompt.width) / 2;
-    this._prompt.y = margin;
+    this.prompt.x = (innerWidth - this.prompt.width) / 2;
+    this.prompt.y = margin;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  TOASTS
-  // ════════════════════════════════════════════════════════════════
-  private _buildToastLayer(): void {
-    this._toastLayer = new PIXI.Container();
-    this._uiLayer.addChild(this._toastLayer);
+  private buildToastLayer(): void {
+    this.toastLayer = new PIXI.Container();
+    this.uiLayer.addChild(this.toastLayer);
   }
 
   showToast(msg: string): void {
@@ -795,10 +728,9 @@ export class UIManager extends EventEmitter {
     toast.alpha = 0;
     toast.x = -tw / 2;
 
-    this._toastLayer.addChild(toast);
-    this._layoutToasts();
+    this.toastLayer.addChild(toast);
+    this.layoutToasts();
 
-    // Animate: fade in (0.3s) → hold (1.65s) → fade out (0.35s)
     let elapsed = 0;
     const total = 2.3;
     const fadeIn = 0.3, fadeOut = 0.35;
@@ -812,37 +744,32 @@ export class UIManager extends EventEmitter {
         toast.alpha = Math.max(0, (total - elapsed) / fadeOut);
       }
       if (elapsed >= total) {
-        this._pixi.ticker.remove(fn);
-        this._toastLayer.removeChild(toast);
-        this._layoutToasts();
+        this.pixiApp.ticker.remove(fn);
+        this.toastLayer.removeChild(toast);
+        this.layoutToasts();
       }
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 
-  private _layoutToasts(): void {
+  private layoutToasts(): void {
     const portrait = innerWidth < innerHeight;
     const baseY    = portrait ? innerHeight * 0.80 : innerHeight - 120;
-    this._toastLayer.x = innerWidth / 2;
-    this._toastLayer.y = baseY;
+    this.toastLayer.x = innerWidth / 2;
+    this.toastLayer.y = baseY;
 
-    // Stack from bottom up
     let yOff = 0;
-    for (let i = this._toastLayer.children.length - 1; i >= 0; i--) {
-      const t = this._toastLayer.children[i] as PIXI.Container;
-      t.y = yOff;
-      yOff -= (t.height + 6);
+    for (let index = this.toastLayer.children.length - 1; index >= 0; index--) {
+      const toast = this.toastLayer.children[index] as PIXI.Container;
+      toast.y = yOff;
+      yOff -= (toast.height + 6);
     }
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  UPGRADE MODAL
-  // ════════════════════════════════════════════════════════════════
-  private _buildUpgradeModal(): void {
-    this._upgradeModal = new PIXI.Container();
-    this._upgradeModal.visible = false;
+  private buildUpgradeModal(): void {
+    this.upgradeModal = new PIXI.Container();
+    this.upgradeModal.visible = false;
 
-    // Backdrop
     const backdrop = new PIXI.Graphics();
     backdrop.beginFill(0x000000, 0.72);
     backdrop.drawRect(0, 0, innerWidth, innerHeight);
@@ -851,11 +778,10 @@ export class UIManager extends EventEmitter {
     backdrop.eventMode = 'static';
     backdrop.on('pointertap', (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._hideUpgradeModal();
+      this.hideUpgradeModal();
     });
-    this._upgradeModal.addChild(backdrop);
+    this.upgradeModal.addChild(backdrop);
 
-    // Box
     const boxW  = Math.min(480, innerWidth * 0.88);
     const boxH  = 280;
     const boxBg = new PIXI.Graphics();
@@ -877,15 +803,14 @@ export class UIManager extends EventEmitter {
     title.anchor.set(0.5, 0);
     title.x = boxW / 2; title.y = 86;
 
-    this._upgradeSubText = new PIXI.Text('', {
+    this.upgradeSubText = new PIXI.Text('', {
       fontFamily: FONT_BODY, fontSize: 16, fontWeight: '700',
       fill: 'rgba(255,255,255,0.73)', wordWrap: true, wordWrapWidth: boxW - 64,
       align: 'center',
     });
-    this._upgradeSubText.anchor.set(0.5, 0);
-    this._upgradeSubText.x = boxW / 2; this._upgradeSubText.y = 128;
+    this.upgradeSubText.anchor.set(0.5, 0);
+    this.upgradeSubText.x = boxW / 2; this.upgradeSubText.y = 128;
 
-    // CTA button
     const ctaW = 200, ctaH = 48;
     const ctaBg = new PIXI.Graphics();
     ctaBg.beginFill(0x3ddc68);
@@ -909,7 +834,6 @@ export class UIManager extends EventEmitter {
     ctaCont.on('pointertap',  (e: PIXI.FederatedPointerEvent) =>
       (e.nativeEvent as PointerEvent).stopImmediatePropagation());
 
-    // Dismiss
     const dismissTxt = new PIXI.Text('Maybe later', {
       fontFamily: FONT_BODY, fontSize: 13, fontWeight: '700',
       fill: 'rgba(255,255,255,0.4)',
@@ -922,22 +846,22 @@ export class UIManager extends EventEmitter {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation());
     dismissTxt.on('pointertap',  (e: PIXI.FederatedPointerEvent) => {
       (e.nativeEvent as PointerEvent).stopImmediatePropagation();
-      this._hideUpgradeModal();
+      this.hideUpgradeModal();
     });
     dismissTxt.on('pointerover', () => { dismissTxt.style.fill = 'rgba(255,255,255,0.8)'; });
     dismissTxt.on('pointerout',  () => { dismissTxt.style.fill = 'rgba(255,255,255,0.4)'; });
 
     const box = new PIXI.Container();
-    box.addChild(boxBg, emoji, title, this._upgradeSubText, ctaCont, dismissTxt);
+    box.addChild(boxBg, emoji, title, this.upgradeSubText, ctaCont, dismissTxt);
     box.name = 'box';
-    this._upgradeModal.addChild(box);
+    this.upgradeModal.addChild(box);
 
-    this._overlayLayer.addChild(this._upgradeModal);
-    this._layoutUpgradeModal();
+    this.overlayLayer.addChild(this.upgradeModal);
+    this.layoutUpgradeModal();
   }
 
-  private _layoutUpgradeModal(): void {
-    const backdrop = this._upgradeModal.getChildByName('backdrop') as PIXI.Graphics;
+  private layoutUpgradeModal(): void {
+    const backdrop = this.upgradeModal.getChildByName('backdrop') as PIXI.Graphics;
     if (backdrop) {
       backdrop.clear();
       backdrop.beginFill(0x000000, 0.72);
@@ -945,7 +869,7 @@ export class UIManager extends EventEmitter {
       backdrop.endFill();
       backdrop.hitArea = new PIXI.Rectangle(0, 0, innerWidth, innerHeight);
     }
-    const box = this._upgradeModal.getChildByName('box') as PIXI.Container;
+    const box = this.upgradeModal.getChildByName('box') as PIXI.Container;
     if (box) {
       box.x = (innerWidth  - box.width)  / 2;
       box.y = (innerHeight - box.height) / 2;
@@ -954,132 +878,120 @@ export class UIManager extends EventEmitter {
 
   showUpgradeModal(type: 'animals' | 'plants'): void {
     if (type === 'animals') {
-      this._upgradeSubText.text =
+      this.upgradeSubText.text =
         `You've placed all ${GameConfig.MAX_ANIMALS} free animals.\nUnlock unlimited animals in the full game!`;
     } else {
-      this._upgradeSubText.text =
+      this.upgradeSubText.text =
         `You've placed all ${GameConfig.MAX_PLANTS} free crops.\nUnlock unlimited crops in the full game!`;
     }
-    this._layoutUpgradeModal();
-    this._upgradeModal.visible = true;
+    this.layoutUpgradeModal();
+    this.upgradeModal.visible = true;
 
-    // Pop-in animation
-    const box = this._upgradeModal.getChildByName('box') as PIXI.Container;
+    const box = this.upgradeModal.getChildByName('box') as PIXI.Container;
     if (!box) return;
     box.scale.set(0.8); box.alpha = 0;
-    let t = 0;
+    let animProgress = 0;
     const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.35, 1);
-      const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
-      const s = lerp(0.8, 1, ease);
-      box.scale.set(s);
-      box.alpha = t;
-      if (t >= 1) this._pixi.ticker.remove(fn);
+      animProgress = Math.min(animProgress + dt / 60 / 0.35, 1);
+      const ease = animProgress < 0.5 ? 2*animProgress*animProgress : -1+(4-2*animProgress)*animProgress;
+      const scale = lerp(0.8, 1, ease);
+      box.scale.set(scale);
+      box.alpha = animProgress;
+      if (animProgress >= 1) this.pixiApp.ticker.remove(fn);
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 
-  private _hideUpgradeModal(): void {
-    this._upgradeModal.visible = false;
+  private hideUpgradeModal(): void {
+    this.upgradeModal.visible = false;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  PUBLIC API
-  // ════════════════════════════════════════════════════════════════
   clearSelection(): void {
-    this._selItem = null;
-    this._prompt.visible = false;
+    this.currentSelection = null;
+    this.prompt.visible = false;
 
-    // Reset all item button visuals
     (['crops', 'animals'] as ItemCategory[]).forEach(cat => {
       ItemCatalog[cat].forEach(item => {
-        const bg = this._itemBtnBgs.get(item.id);
-        if (bg) this._drawItemBtnBg(bg, 210, 56, false, this._coins < item.cost);
+        const bg = this.itemButtonBackgrounds.get(item.id);
+        if (bg) this.drawItemBtnBg(bg, 210, 56, false, this.coinBalance < item.cost);
       });
-      // Reset cat icon to default
-      const defKey = this._catDefaultImg[cat] as string;
+      const defKey = this.categoryDefaultImages[cat] as string;
       const defTex = PIXI.Texture.from(defKey);
-      this._catIconSprites[cat].texture = defTex;
+      this.categoryIconSprites[cat].texture = defTex;
     });
 
     this.emit('itemSelected', null);
   }
 
   onItemPlaced(name: string, cost: number, sx?: number, sy?: number): void {
-    this._coins = Math.max(0, this._coins - cost);
-    this._updateCoinText();
-    this._bounceCoinHUD();
-    this._prompt.visible = false;
-    this._selItem = null;
+    this.coinBalance = Math.max(0, this.coinBalance - cost);
+    this.updateCoinText();
+    this.bounceCoinHUD();
+    this.prompt.visible = false;
+    this.currentSelection = null;
     this.showToast(`✨ ${name} placed!`);
-    if (sx !== undefined && sy !== undefined) this._spawnSparkles(sx, sy);
+    if (sx !== undefined && sy !== undefined) this.spawnSparkles(sx, sy);
   }
 
   showSkipDay(onClick: () => void): void {
-    this._skipDayHandler = onClick;
-    this._skipDayBtn.visible = true;
-    this._layoutSkipDay();
+    this.skipDayHandler = onClick;
+    this.skipDayBtn.visible = true;
+    this.layoutSkipDay();
   }
 
   hideSkipDay(): void {
-    this._skipDayBtn.visible = false;
+    this.skipDayBtn.visible = false;
   }
 
   incrementCount(zone: 'field' | 'fence'): void {
-    if (zone === 'fence') this._animalCount++;
-    else                  this._plantCount++;
+    if (zone === 'fence') this.placedAnimalCount++;
+    else                  this.placedPlantCount++;
   }
 
   /** Show sidebar — called by TutorialState when tutorial completes. */
   showSidebar(): void {
-    let t = 0;
+    let animProgress = 0;
     const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.6, 1);
-      this._sidebar.alpha = t;
-      if (t >= 1) this._pixi.ticker.remove(fn);
+      animProgress = Math.min(animProgress + dt / 60 / 0.6, 1);
+      this.sidebar.alpha = animProgress;
+      if (animProgress >= 1) this.pixiApp.ticker.remove(fn);
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 
   updateMuteIcon(_muted: boolean): void {}
   updateDNIcon(_isDay: boolean):   void {}
 
-  // ════════════════════════════════════════════════════════════════
-  //  RESIZE
-  // ════════════════════════════════════════════════════════════════
-  private _onResize(): void {
-    this._pixi.renderer.resize(innerWidth, innerHeight);
-    this._layoutCoinHUD();
-    this._layoutWatermark();
-    this._layoutSkipDay();
-    this._layoutSidebar();
-    this._layoutPrompt();
-    this._layoutToasts();
-    this._layoutUpgradeModal();
+  private onResize(): void {
+    this.pixiApp.renderer.resize(innerWidth, innerHeight);
+    this.layoutCoinHUD();
+    this.layoutWatermark();
+    this.layoutSkipDay();
+    this.layoutSidebar();
+    this.layoutPrompt();
+    this.layoutToasts();
+    this.layoutUpgradeModal();
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  SPARKLES  (PixiJS particle effect)
-  // ════════════════════════════════════════════════════════════════
-  private _spawnSparkles(sx: number, sy: number): void {
-    const tex = this._smokeTexture ?? PIXI.Texture.from('/assets/images/smoke.png');
+  private spawnSparkles(sx: number, sy: number): void {
+    const tex = this.smokeTexture ?? PIXI.Texture.from('/assets/images/smoke.png');
 
-    type Puff = { s: PIXI.Sprite; vx: number; vy: number; vr: number; life: number; maxLife: number };
+    type Puff = { sprite: PIXI.Sprite; vx: number; vy: number; vr: number; life: number; maxLife: number };
     const puffs: Puff[] = [];
 
-    for (let i = 0; i < 6; i++) {
-      const s    = new PIXI.Sprite(tex);
-      s.anchor.set(0.5);
+    for (let index = 0; index < 6; index++) {
+      const sprite = new PIXI.Sprite(tex);
+      sprite.anchor.set(0.5);
       const size = 40 + Math.random() * 40;
-      s.width  = size; s.height = size;
-      s.position.set(sx + (Math.random()-0.5)*20, sy + (Math.random()-0.5)*10);
-      s.alpha  = 0;
-      this._fxLayer.addChild(s);
+      sprite.width  = size; sprite.height = size;
+      sprite.position.set(sx + (Math.random()-0.5)*20, sy + (Math.random()-0.5)*10);
+      sprite.alpha  = 0;
+      this.fxLayer.addChild(sprite);
 
       const angle = -Math.PI/2 + (Math.random()-0.5)*Math.PI;
       const speed = 30 + Math.random() * 50;
       const life  = 0.55 + Math.random() * 0.35;
-      puffs.push({ s, life, maxLife: life,
+      puffs.push({ sprite, life, maxLife: life,
         vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
         vr: (Math.random()-0.5)*1.5 });
     }
@@ -1087,56 +999,53 @@ export class UIManager extends EventEmitter {
     const fn = (dt: number) => {
       const delta = dt / 60;
       let done = true;
-      puffs.forEach(p => {
-        if (p.life <= 0) { p.s.alpha = 0; return; }
+      puffs.forEach(puff => {
+        if (puff.life <= 0) { puff.sprite.alpha = 0; return; }
         done = false;
-        p.life -= delta;
-        const t = p.life / p.maxLife;
-        p.s.alpha    = t < 0.8 ? t/0.8*0.8 : (1-t)/0.2*0.8;
-        p.s.x       += p.vx * delta;
-        p.s.y       += p.vy * delta;
-        p.vy        -= 15 * delta;
-        p.s.rotation += p.vr * delta;
-        p.s.scale.set(1 + (1-t)*1.2);
+        puff.life -= delta;
+        const progress = puff.life / puff.maxLife;
+        puff.sprite.alpha    = progress < 0.8 ? progress/0.8*0.8 : (1-progress)/0.2*0.8;
+        puff.sprite.x       += puff.vx * delta;
+        puff.sprite.y       += puff.vy * delta;
+        puff.vy             -= 15 * delta;
+        puff.sprite.rotation += puff.vr * delta;
+        puff.sprite.scale.set(1 + (1-progress)*1.2);
       });
       if (done) {
-        puffs.forEach(p => this._fxLayer.removeChild(p.s));
-        this._pixi.ticker.remove(fn);
+        puffs.forEach(puff => this.fxLayer.removeChild(puff.sprite));
+        this.pixiApp.ticker.remove(fn);
       }
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 
-  // ════════════════════════════════════════════════════════════════
-  //  HELPERS
-  // ════════════════════════════════════════════════════════════════
-  private _itemEmoji(id: string): string {
-    const m: Record<string, string> = {
+  private itemEmoji(id: string): string {
+    const emojiMap: Record<string, string> = {
       chicken:'🐔', cow:'🐄', sheep:'🐑',
       corn:'🌽', grape:'🍇', strawberry:'🍓', tomato:'🍅',
     };
-    return m[id] ?? '🌱';
+    return emojiMap[id] ?? '🌱';
   }
 
-  private _bounceCoinHUD(): void {
-    let t = 0;
+  private bounceCoinHUD(): void {
+    let animProgress = 0;
     const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.35, 1);
-      const s = 1 + 0.2 * Math.sin(t * Math.PI);
-      this._coinHUD.scale.set(s);
-      if (t >= 1) { this._coinHUD.scale.set(1); this._pixi.ticker.remove(fn); }
+      animProgress = Math.min(animProgress + dt / 60 / 0.35, 1);
+      const scale = 1 + 0.2 * Math.sin(animProgress * Math.PI);
+      this.coinHUD.scale.set(scale);
+      if (animProgress >= 1) { this.coinHUD.scale.set(1); this.pixiApp.ticker.remove(fn); }
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 
-  private _shakeCoinHUD(): void {
-    const origX = this._coinHUD.x;
-    let t = 0;
+  private shakeCoinHUD(): void {
+    const origX = this.coinHUD.x;
+    let animProgress = 0;
     const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.3, 1);
-      this._coinHUD.x = origX + Math.sin(t * Math.PI * 5) * 6 * (1 - t);
-      if (t >= 1) { this._coinHUD.x = origX; this._pixi.ticker.remove(fn); }
+      animProgress = Math.min(animProgress + dt / 60 / 0.3, 1);
+      this.coinHUD.x = origX + Math.sin(animProgress * Math.PI * 5) * 6 * (1 - animProgress);
+      if (animProgress >= 1) { this.coinHUD.x = origX; this.pixiApp.ticker.remove(fn); }
     };
-    this._pixi.ticker.add(fn);
+    this.pixiApp.ticker.add(fn);
   }
 }

@@ -15,18 +15,18 @@ export class Game {
 
   readonly container: HTMLElement;
 
-  private _states:  Map<string, GameState>;
-  private _current: GameState | null = null;
-  private _lastTime = 0;
-  private _raf = 0;
+  private states:      Map<string, GameState>;
+  private currentState: GameState | null = null;
+  private lastTime  = 0;
+  private rafId     = 0;
 
   readonly stateMachine = {
-    transition: (name: string) => this._transition(name),
+    transition: (name: string) => this.transition(name),
   };
 
   constructor(container: HTMLElement) {
     this.container = container;
-    this._states = new Map<string, GameState>([
+    this.states = new Map<string, GameState>([
       ['loading',  new LoadingState(this)],
       ['tutorial', new TutorialState(this)],
       ['play',     new PlayState(this)],
@@ -34,7 +34,6 @@ export class Game {
   }
 
   async start(): Promise<void> {
-    // Setup container
     Object.assign(this.container.style, {
       position: 'relative', overflow: 'hidden',
       width: '100%', height: '100%',
@@ -45,12 +44,10 @@ export class Game {
     await this.audioManager.init();
     await this.uiManager.init(this.container);
 
-    // Rebind OrbitControls to the Pixi canvas (now the topmost event target)
     this.sceneManager.bindControlsTo(this.uiManager.canvas);
 
-    // Start loading
-    this._transition('loading');
-    const loading = this._states.get('loading') as LoadingState;
+    this.transition('loading');
+    const loading = this.states.get('loading') as LoadingState;
 
     try {
       await this.assetManager.loadAll((pct) => {
@@ -63,31 +60,31 @@ export class Game {
       console.error('Asset loading failed', e);
     }
 
-    this._transition('tutorial');
-    this._loop(0);
+    this.transition('tutorial');
+    this.loop(0);
   }
 
-  private _transition(name: string): void {
-    this._current?.exit();
-    const next = this._states.get(name);
+  private transition(name: string): void {
+    this.currentState?.exit();
+    const next = this.states.get(name);
     if (!next) throw new Error(`Unknown state: ${name}`);
-    this._current = next;
-    this._current.enter();
+    this.currentState = next;
+    this.currentState.enter();
   }
 
-  private _loop = (time: number): void => {
-    const dt = Math.min((time - this._lastTime) / 1000, 0.05);
-    this._lastTime = time;
+  private loop = (time: number): void => {
+    const dt = Math.min((time - this.lastTime) / 1000, 0.05);
+    this.lastTime = time;
 
-    this._current?.update(dt);
+    this.currentState?.update(dt);
     this.sceneManager.update();
     this.sceneManager.render();
 
-    this._raf = requestAnimationFrame(this._loop);
+    this.rafId = requestAnimationFrame(this.loop);
   };
 
   dispose(): void {
-    cancelAnimationFrame(this._raf);
-    this._current?.exit();
+    cancelAnimationFrame(this.rafId);
+    this.currentState?.exit();
   }
 }

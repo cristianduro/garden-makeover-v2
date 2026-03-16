@@ -3,30 +3,28 @@ import { GameState } from './GameState';
 import { Game }      from '../core/Game';
 
 export class LoadingState extends GameState {
-  private _container!: PIXI.Container;
-  private _bar!:       PIXI.Graphics;
-  private _label!:     PIXI.Text;
-  private _barMaxW     = 360;
+  private container!:     PIXI.Container;
+  private progressBar!:   PIXI.Graphics;
+  private progressLabel!: PIXI.Text;
+  private barMaxWidth     = 360;
 
   enter(): void {
-    const game = this._game as Game;
-    const app  = game.uiManager.app;
-    const W    = innerWidth;
-    const H    = innerHeight;
+    const game   = this.game as Game;
+    const app    = game.uiManager.app;
+    const width  = innerWidth;
+    const height = innerHeight;
 
-    this._container = new PIXI.Container();
+    this.container = new PIXI.Container();
 
-    // ── Gradient background (dark green) ──────────────────────
     const bg = new PIXI.Graphics();
     bg.beginFill(0x1a2a1a);
-    bg.drawRect(0, 0, W, H);
+    bg.drawRect(0, 0, width, height);
     bg.endFill();
-    this._container.addChild(bg);
+    this.container.addChild(bg);
 
-    // ── Title ──────────────────────────────────────────────────
     const title = new PIXI.Text('🌱 Garden Makeover', {
       fontFamily: 'Arial, sans-serif',
-      fontSize:   Math.min(44, Math.max(26, W * 0.05)),
+      fontSize:   Math.min(44, Math.max(26, width * 0.05)),
       fill:       0xffffff,
       dropShadow: true,
       dropShadowColor: 0x3ddc68,
@@ -35,66 +33,62 @@ export class LoadingState extends GameState {
       dropShadowAlpha: 0.5,
     });
     title.anchor.set(0.5);
-    title.x = W / 2;
-    title.y = H / 2 - 60;
-    this._container.addChild(title);
+    title.x = width / 2;
+    title.y = height / 2 - 60;
+    this.container.addChild(title);
 
-    // ── Progress bar track ────────────────────────────────────
-    this._barMaxW = Math.min(360, W * 0.8);
+    this.barMaxWidth = Math.min(360, width * 0.8);
     const barTrack = new PIXI.Graphics();
     barTrack.beginFill(0xffffff, 0.15);
-    barTrack.drawRoundedRect(0, 0, this._barMaxW, 10, 10);
+    barTrack.drawRoundedRect(0, 0, this.barMaxWidth, 10, 10);
     barTrack.endFill();
-    barTrack.x = W / 2 - this._barMaxW / 2;
-    barTrack.y = H / 2;
-    this._container.addChild(barTrack);
+    barTrack.x = width / 2 - this.barMaxWidth / 2;
+    barTrack.y = height / 2;
+    this.container.addChild(barTrack);
 
-    // ── Progress bar fill ─────────────────────────────────────
-    this._bar = new PIXI.Graphics();
-    this._bar.x = barTrack.x;
-    this._bar.y = barTrack.y;
-    this._drawBar(0);
-    this._container.addChild(this._bar);
+    this.progressBar = new PIXI.Graphics();
+    this.progressBar.x = barTrack.x;
+    this.progressBar.y = barTrack.y;
+    this.drawBar(0);
+    this.container.addChild(this.progressBar);
 
-    // ── Label ─────────────────────────────────────────────────
-    this._label = new PIXI.Text('Loading assets…', {
+    this.progressLabel = new PIXI.Text('Loading assets…', {
       fontFamily: 'Arial, sans-serif',
       fontSize:   14,
       fill:       'rgba(255,255,255,0.6)',
     });
-    this._label.anchor.set(0.5, 0);
-    this._label.x = W / 2;
-    this._label.y = H / 2 + 24;
-    this._container.addChild(this._label);
+    this.progressLabel.anchor.set(0.5, 0);
+    this.progressLabel.x = width / 2;
+    this.progressLabel.y = height / 2 + 24;
+    this.container.addChild(this.progressLabel);
 
-    game.uiManager.overlayLayer.addChild(this._container);
+    game.uiManager.overlayLayer.addChild(this.container);
   }
 
   setProgress(pct: number, msg?: string): void {
-    this._drawBar(pct);
-    if (msg) this._label.text = msg;
+    this.drawBar(pct);
+    if (msg) this.progressLabel.text = msg;
   }
 
-  private _drawBar(pct: number): void {
-    const w = Math.max(0, (pct / 100) * this._barMaxW);
-    this._bar.clear();
-    if (w > 0) {
-      this._bar.beginFill(0x3ddc68);
-      this._bar.drawRoundedRect(0, 0, w, 10, 10);
-      this._bar.endFill();
+  private drawBar(pct: number): void {
+    const fillWidth = Math.max(0, (pct / 100) * this.barMaxWidth);
+    this.progressBar.clear();
+    if (fillWidth > 0) {
+      this.progressBar.beginFill(0x3ddc68);
+      this.progressBar.drawRoundedRect(0, 0, fillWidth, 10, 10);
+      this.progressBar.endFill();
     }
   }
 
   exit(): void {
-    const app = (this._game as Game).uiManager.app;
-    // Fade out
-    let t = 0;
+    const app = (this.game as Game).uiManager.app;
+    let animProgress = 0;
     const fn = (dt: number) => {
-      t = Math.min(t + dt / 60 / 0.5, 1);
-      this._container.alpha = 1 - t;
-      if (t >= 1) {
+      animProgress = Math.min(animProgress + dt / 60 / 0.5, 1);
+      this.container.alpha = 1 - animProgress;
+      if (animProgress >= 1) {
         app.ticker.remove(fn);
-        (this._game as Game).uiManager.overlayLayer.removeChild(this._container);
+        (this.game as Game).uiManager.overlayLayer.removeChild(this.container);
       }
     };
     app.ticker.add(fn);
