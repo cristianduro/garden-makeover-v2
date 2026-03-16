@@ -12,6 +12,7 @@ const STEPS: TutStep[] = [
   { text: "This is your Cropland.\nPlant fruits and vegetables here!", camIdx: 1 },
   { text: "And this is the Animal Pen.\nKeep your livestock safe!", camIdx: 2 },
   { text: "Tap the ＋ buttons\nto add crops or animals.\nLet's build your farm!", camIdx: 3 },
+  { text: "Remember to orbit and zoom the view\nfor better placement!", camIdx: 3 },
 ];
 
 const MAX_LINES = Math.max(...STEPS.map(s => s.text.split('\n').length));
