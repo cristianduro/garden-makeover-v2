@@ -3,98 +3,90 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GameConfig } from '../core/GameConfig';
 
 export class SceneManager {
-  private _renderer!: THREE.WebGLRenderer;
-  private _scene!:    THREE.Scene;
-  private _camera!:   THREE.PerspectiveCamera;
-  private _controls!: OrbitControls;
-  private _ambient!:  THREE.AmbientLight;
-  private _sun!:      THREE.DirectionalLight;
-  private _fillLight!: THREE.DirectionalLight;
+  private webGLRenderer!: THREE.WebGLRenderer;
+  private threeScene!:    THREE.Scene;
+  private perspCamera!:   THREE.PerspectiveCamera;
+  private orbitControls!: OrbitControls;
+  private ambientLight!:  THREE.AmbientLight;
+  private sunLight!:      THREE.DirectionalLight;
+  private fillDirectionalLight!: THREE.DirectionalLight;
 
   async init(container: HTMLElement): Promise<void> {
-    const cfg = GameConfig;
-
-    // Renderer
-    this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    this._renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this._renderer.setSize(innerWidth, innerHeight);
-    this._renderer.shadowMap.enabled = true;
-    this._renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
-    this._renderer.toneMapping       = THREE.ACESFilmicToneMapping;
-    this._renderer.toneMappingExposure = 1.05;
-    Object.assign(this._renderer.domElement.style, {
+    this.webGLRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.webGLRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.webGLRenderer.setSize(innerWidth, innerHeight);
+    this.webGLRenderer.shadowMap.enabled = true;
+    this.webGLRenderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    this.webGLRenderer.toneMapping       = THREE.ACESFilmicToneMapping;
+    this.webGLRenderer.toneMappingExposure = 1.05;
+    Object.assign(this.webGLRenderer.domElement.style, {
       position: 'absolute', inset: '0', zIndex: '1',
     });
-    container.appendChild(this._renderer.domElement);
+    container.appendChild(this.webGLRenderer.domElement);
 
-    // Scene
-    this._scene = new THREE.Scene();
-    this._scene.background = new THREE.Color(cfg.SKY_DAY);
-    this._scene.fog = new THREE.Fog(cfg.FOG_DAY.color, cfg.FOG_DAY.near, cfg.FOG_DAY.far);
+    this.threeScene = new THREE.Scene();
+    this.threeScene.background = new THREE.Color(GameConfig.SKY_DAY);
+    this.threeScene.fog = new THREE.Fog(GameConfig.FOG_DAY.color, GameConfig.FOG_DAY.near, GameConfig.FOG_DAY.far);
 
-    // Camera
-    this._camera = new THREE.PerspectiveCamera(
-      cfg.CAM_FOV, innerWidth/innerHeight, cfg.CAM_NEAR, cfg.CAM_FAR
+    this.perspCamera = new THREE.PerspectiveCamera(
+      GameConfig.CAM_FOV, innerWidth/innerHeight, GameConfig.CAM_NEAR, GameConfig.CAM_FAR
     );
-    // Pull back further in portrait so full farm is visible
     const isPortrait = innerWidth < innerHeight;
     const camPos = isPortrait
-      ? { x: cfg.CAM_POS.x, y: cfg.CAM_POS.y * 1.5, z: cfg.CAM_POS.z * 1.5 }
-      : cfg.CAM_POS;
-    this._camera.position.set(camPos.x, camPos.y, camPos.z);
+      ? { x: GameConfig.CAM_POS.x, y: GameConfig.CAM_POS.y * 1.5, z: GameConfig.CAM_POS.z * 1.5 }
+      : GameConfig.CAM_POS;
+    this.perspCamera.position.set(camPos.x, camPos.y, camPos.z);
 
-    // Lights
-    this._ambient = new THREE.AmbientLight(cfg.AMBIENT_DAY.color, cfg.AMBIENT_DAY.intensity);
-    this._scene.add(this._ambient);
+    this.ambientLight = new THREE.AmbientLight(GameConfig.AMBIENT_DAY.color, GameConfig.AMBIENT_DAY.intensity);
+    this.threeScene.add(this.ambientLight);
 
-    this._sun = new THREE.DirectionalLight(cfg.DIR_DAY.color, cfg.DIR_DAY.intensity);
-    this._sun.position.set(12, 28, 18);
-    this._sun.target.position.set(-1, 0, -6);
-    this._sun.castShadow = true;
-    this._sun.shadow.mapSize.set(2048, 2048);
-    this._sun.shadow.camera.near = 5;
-    this._sun.shadow.camera.far  = 120;
-    this._sun.shadow.camera.left = this._sun.shadow.camera.bottom = -35;
-    this._sun.shadow.camera.right = this._sun.shadow.camera.top   =  35;
-    this._sun.shadow.bias = -0.0003;
-    this._scene.add(this._sun);
-    this._scene.add(this._sun.target);
+    this.sunLight = new THREE.DirectionalLight(GameConfig.DIR_DAY.color, GameConfig.DIR_DAY.intensity);
+    this.sunLight.position.set(12, 28, 18);
+    this.sunLight.target.position.set(-1, 0, -6);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.camera.near = 5;
+    this.sunLight.shadow.camera.far  = 120;
+    this.sunLight.shadow.camera.left = this.sunLight.shadow.camera.bottom = -35;
+    this.sunLight.shadow.camera.right = this.sunLight.shadow.camera.top   =  35;
+    this.sunLight.shadow.bias = -0.0003;
+    this.threeScene.add(this.sunLight);
+    this.threeScene.add(this.sunLight.target);
 
-    this._fillLight = new THREE.DirectionalLight(0xaaccff, 0.35);
-    this._fillLight.position.set(-15, 10, -10);
-    this._scene.add(this._fillLight);
+    this.fillDirectionalLight = new THREE.DirectionalLight(0xaaccff, 0.35);
+    this.fillDirectionalLight.position.set(-15, 10, -10);
+    this.threeScene.add(this.fillDirectionalLight);
 
-    // OrbitControls
-    this._controls = new OrbitControls(this._camera, this._renderer.domElement);
-    this._controls.target.set(cfg.CAM_TARGET.x, cfg.CAM_TARGET.y, cfg.CAM_TARGET.z);
-    this._controls.minPolarAngle  = cfg.CAM_MIN_POLAR;
-    this._controls.maxPolarAngle  = cfg.CAM_MAX_POLAR;
-    this._controls.minDistance    = cfg.CAM_MIN_DIST;
-    this._controls.maxDistance    = cfg.CAM_MAX_DIST;
-    this._controls.enableDamping  = true;
-    this._controls.dampingFactor  = 0.08;
-    this._controls.enablePan      = false;
-    this._controls.screenSpacePanning = true;
-    this._controls.update();
+    this.orbitControls = new OrbitControls(this.perspCamera, this.webGLRenderer.domElement);
+    this.orbitControls.target.set(GameConfig.CAM_TARGET.x, GameConfig.CAM_TARGET.y, GameConfig.CAM_TARGET.z);
+    this.orbitControls.minPolarAngle  = GameConfig.CAM_MIN_POLAR;
+    this.orbitControls.maxPolarAngle  = GameConfig.CAM_MAX_POLAR;
+    this.orbitControls.minDistance    = GameConfig.CAM_MIN_DIST;
+    this.orbitControls.maxDistance    = GameConfig.CAM_MAX_DIST;
+    this.orbitControls.enableDamping  = true;
+    this.orbitControls.dampingFactor  = 0.08;
+    this.orbitControls.enablePan      = false;
+    this.orbitControls.screenSpacePanning = true;
+    this.orbitControls.update();
 
-    window.addEventListener('resize', this._onResize);
+    window.addEventListener('resize', this.onResize);
   }
 
   loadGround(assets: any): void {
     const gltf = assets.get('ground');
     if (!gltf) { console.error('ground.glb not loaded'); return; }
-    const g = gltf.scene.clone(true);
-    g.traverse((o: THREE.Object3D) => {
+    const groundMesh = gltf.scene.clone(true);
+    groundMesh.traverse((o: THREE.Object3D) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow    = true;
         o.receiveShadow = true;
       }
     });
-    this._scene.add(g);
+    this.threeScene.add(groundMesh);
   }
 
   setControlsEnabled(v: boolean): void {
-    this._controls.enabled = v;
+    this.orbitControls.enabled = v;
   }
 
   /**
@@ -102,47 +94,45 @@ export class SceneManager {
    * Call this once, after the overlay canvas is in the DOM.
    */
   bindControlsTo(element: HTMLElement): void {
-    const cfg     = GameConfig;
-    const target  = this._controls.target.clone();
-    const enabled = this._controls.enabled;
-    this._controls.dispose();
+    const target  = this.orbitControls.target.clone();
+    const enabled = this.orbitControls.enabled;
+    this.orbitControls.dispose();
 
-    this._controls = new OrbitControls(this._camera, element);
-    this._controls.target.copy(target);
-    this._controls.minPolarAngle      = cfg.CAM_MIN_POLAR;
-    this._controls.maxPolarAngle      = cfg.CAM_MAX_POLAR;
-    this._controls.minDistance        = cfg.CAM_MIN_DIST;
-    this._controls.maxDistance        = cfg.CAM_MAX_DIST;
-    this._controls.enableDamping      = true;
-    this._controls.dampingFactor      = 0.08;
-    this._controls.enablePan          = false;
-    this._controls.screenSpacePanning = true;
-    this._controls.enabled            = enabled;
-    this._controls.update();
+    this.orbitControls = new OrbitControls(this.perspCamera, element);
+    this.orbitControls.target.copy(target);
+    this.orbitControls.minPolarAngle      = GameConfig.CAM_MIN_POLAR;
+    this.orbitControls.maxPolarAngle      = GameConfig.CAM_MAX_POLAR;
+    this.orbitControls.minDistance        = GameConfig.CAM_MIN_DIST;
+    this.orbitControls.maxDistance        = GameConfig.CAM_MAX_DIST;
+    this.orbitControls.enableDamping      = true;
+    this.orbitControls.dampingFactor      = 0.08;
+    this.orbitControls.enablePan          = false;
+    this.orbitControls.screenSpacePanning = true;
+    this.orbitControls.enabled            = enabled;
+    this.orbitControls.update();
   }
 
   update(): void {
-    this._controls.update();
+    this.orbitControls.update();
   }
 
   render(): void {
-    this._renderer.render(this._scene, this._camera);
+    this.webGLRenderer.render(this.threeScene, this.perspCamera);
   }
 
-  private _onResize = (): void => {
-    // Use container size if available, fallback to window
-    const w = this._renderer.domElement.parentElement?.clientWidth || innerWidth;
-    const h = this._renderer.domElement.parentElement?.clientHeight || innerHeight;
-    this._camera.aspect = w / h;
-    this._camera.updateProjectionMatrix();
-    this._renderer.setSize(w, h);
+  private onResize = (): void => {
+    const width  = this.webGLRenderer.domElement.parentElement?.clientWidth || innerWidth;
+    const height = this.webGLRenderer.domElement.parentElement?.clientHeight || innerHeight;
+    this.perspCamera.aspect = width / height;
+    this.perspCamera.updateProjectionMatrix();
+    this.webGLRenderer.setSize(width, height);
   };
 
-  get renderer(): THREE.WebGLRenderer { return this._renderer; }
-  get scene():    THREE.Scene          { return this._scene;    }
-  get camera():   THREE.PerspectiveCamera { return this._camera; }
-  get controls(): OrbitControls        { return this._controls; }
-  get ambient():  THREE.AmbientLight      { return this._ambient;   }
-  get sun():      THREE.DirectionalLight  { return this._sun;       }
-  get fill():     THREE.DirectionalLight  { return this._fillLight; }
+  get renderer(): THREE.WebGLRenderer        { return this.webGLRenderer; }
+  get scene():    THREE.Scene                { return this.threeScene;    }
+  get camera():   THREE.PerspectiveCamera    { return this.perspCamera;   }
+  get controls(): OrbitControls              { return this.orbitControls; }
+  get ambient():  THREE.AmbientLight         { return this.ambientLight;  }
+  get sun():      THREE.DirectionalLight     { return this.sunLight;      }
+  get fill():     THREE.DirectionalLight     { return this.fillDirectionalLight; }
 }

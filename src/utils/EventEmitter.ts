@@ -1,21 +1,21 @@
 type Listener = (...args: any[]) => void;
 
 export class EventEmitter {
-  private _listeners = new Map<string, Set<Listener>>();
+  private listeners = new Map<string, Set<Listener>>();
 
   on(event: string, fn: Listener): this {
-    if (!this._listeners.has(event)) this._listeners.set(event, new Set());
-    this._listeners.get(event)!.add(fn);
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(fn);
     return this;
   }
 
   off(event: string, fn: Listener): this {
-    this._listeners.get(event)?.delete(fn);
+    this.listeners.get(event)?.delete(fn);
     return this;
   }
 
   emit(event: string, ...args: any[]): void {
-    this._listeners.get(event)?.forEach(fn => fn(...args));
+    this.listeners.get(event)?.forEach(fn => fn(...args));
   }
 
   once(event: string, fn: Listener): this {
