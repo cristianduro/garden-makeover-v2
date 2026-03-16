@@ -10,7 +10,7 @@
 
 ## 🎮 What is it?
 
-**Garden Makeover** is a fully playable mini-game built with **Three.js** (3D) and **Pixi.js** (2D FX), designed as a high-quality playable advertisement for mobile and desktop. It showcases real-time 3D rendering, cinematic state transitions, and responsive touch-friendly UI — all in a single self-contained web app.
+**Garden Makeover** is a fully playable mini-game built with **Three.js** (3D) and **Pixi.js** (UI,2D FX), designed as a high-quality playable advertisement for mobile and desktop. It showcases real-time 3D rendering, cinematic state transitions, and responsive touch-friendly UI — all in a single self-contained web app.
 
 ---
 
@@ -102,7 +102,7 @@ src/
 │   ├── AssetManager.ts      # GLTF + texture preloading
 │   ├── SceneManager.ts      # Three.js scene, camera, renderer, lights
 │   ├── AudioManager.ts      # Web Audio wrapper
-│   └── UIManager.ts         # All DOM/CSS UI: HUD, sidebar, modals, FX
+│   └── UIManager.ts         # All PIXI UI: HUD, sidebar, modals, FX
 ├── garden/
 │   ├── GardenGrid.ts        # Grid logic for field and fence zones
 │   ├── ItemCatalog.ts       # Item definitions (crops + animals)
